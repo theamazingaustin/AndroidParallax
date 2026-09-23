@@ -357,7 +357,7 @@ fun ProjectGalleryScreen(
             }
         }
 
-        // Floating button to import new photo
+        // Material 3 floating add (plus) button bottom right
         FloatingActionButton(
             onClick = onNewProjectClick,
             modifier = Modifier
@@ -366,14 +366,11 @@ fun ProjectGalleryScreen(
             containerColor = Color(0xFF00E5FF),
             contentColor = Color.Black
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "New Wallpaper")
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("New Wallpaper", fontWeight = FontWeight.SemiBold)
-            }
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = "Create New Wallpaper",
+                modifier = Modifier.size(32.dp)
+            )
         }
     }
 }

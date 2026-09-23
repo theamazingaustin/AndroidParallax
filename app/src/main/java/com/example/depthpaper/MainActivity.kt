@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val context = LocalContext.current
                     val state by viewModel.uiState.collectAsState()
-                    var currentScreen by remember { mutableStateOf(AppScreen.STUDIO) }
+                    var currentScreen by remember { mutableStateOf(AppScreen.GALLERY) }
 
                     val galleryPhotoLauncher = rememberLauncherForActivityResult(
                         contract = ActivityResultContracts.GetContent()
@@ -70,6 +71,7 @@ class MainActivity : ComponentActivity() {
                             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                                 ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, it)) { decoder, _, _ ->
                                     decoder.isMutableRequired = true
+                                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                                 }
                             } else {
                                 @Suppress("DEPRECATION")
@@ -78,6 +80,10 @@ class MainActivity : ComponentActivity() {
                             viewModel.importNewImage(bitmap, "New Wallpaper")
                             currentScreen = AppScreen.STUDIO
                         }
+                    }
+
+                    BackHandler(enabled = currentScreen == AppScreen.STUDIO) {
+                        currentScreen = AppScreen.GALLERY
                     }
 
                     when (currentScreen) {
