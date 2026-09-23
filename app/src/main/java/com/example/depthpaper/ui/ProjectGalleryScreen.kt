@@ -33,7 +33,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,12 +43,20 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,7 +67,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.depthpaper.BuildConfig
+import com.example.depthpaper.core.AppUpdater
+import com.example.depthpaper.core.UpdateInfo
 import com.example.depthpaper.data.WallpaperProject
+import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -76,6 +90,119 @@ fun ProjectGalleryScreen(
 ) {
     val activeProject = projects.firstOrNull { it.isActive }
     val favoriteProjects = projects.filter { it.isFavorite && !it.isActive }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+    var isDownloading by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableFloatStateOf(0f) }
+    var updateError by remember { mutableStateOf<String?>(null) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+
+    // Automatic update check upon launch
+    LaunchedEffect(Unit) {
+        val latest = AppUpdater.checkForUpdate()
+        if (latest != null) {
+            updateInfo = latest
+        }
+    }
+
+    // Update Dialog
+    updateInfo?.let { info ->
+        AlertDialog(
+            onDismissRequest = { if (!isDownloading) updateInfo = null },
+            containerColor = Color(0xFF1E1E2E),
+            titleContentColor = Color.White,
+            textContentColor = Color.LightGray,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Update Available: ${info.versionTag}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val sizeMb = info.apkSizeBytes / (1024f * 1024f)
+                    Text(
+                        text = "A new version of DepthPaper is available on GitHub (~${"%.1f".format(sizeMb)} MB).",
+                        fontSize = 14.sp
+                    )
+                    if (info.releaseNotes.isNotBlank()) {
+                        Text(
+                            text = info.releaseNotes.take(180) + if (info.releaseNotes.length > 180) "..." else "",
+                            fontSize = 12.sp,
+                            color = Color.Gray
+                        )
+                    }
+
+                    if (isDownloading) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color(0xFF00E5FF),
+                            trackColor = Color(0xFF2A2A40)
+                        )
+                        Text(
+                            text = "Downloading ${(downloadProgress * 100).toInt()}%...",
+                            fontSize = 12.sp,
+                            color = Color(0xFF00E5FF)
+                        )
+                    }
+
+                    updateError?.let { err ->
+                        Text(text = err, color = Color(0xFFFF5252), fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isDownloading = true
+                        updateError = null
+                        coroutineScope.launch {
+                            AppUpdater.downloadAndInstallApk(
+                                context = context,
+                                update = info,
+                                onProgress = { downloadProgress = it },
+                                onError = {
+                                    updateError = it
+                                    isDownloading = false
+                                }
+                            )
+                        }
+                    },
+                    enabled = !isDownloading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = if (isDownloading) "Downloading..." else "Download & Install",
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                if (!isDownloading) {
+                    TextButton(onClick = { updateInfo = null }) {
+                        Text("Later", color = Color.Gray)
+                    }
+                }
+            }
+        )
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -96,12 +223,39 @@ fun ProjectGalleryScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(
-                            text = "Depth Studio",
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Depth Studio",
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                color = Color(0xFF222238),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    if (!isCheckingUpdate) {
+                                        isCheckingUpdate = true
+                                        coroutineScope.launch {
+                                            val latest = AppUpdater.checkForUpdate()
+                                            isCheckingUpdate = false
+                                            if (latest != null) {
+                                                updateInfo = latest
+                                            }
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    text = if (isCheckingUpdate) "Checking..." else "v${BuildConfig.VERSION_NAME}",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF00E5FF),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                         Text(
                             text = "Layered & 3D Parallax Wallpapers",
                             fontSize = 14.sp,
