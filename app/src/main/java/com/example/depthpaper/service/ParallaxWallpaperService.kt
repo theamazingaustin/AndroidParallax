@@ -17,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
+import com.example.depthpaper.core.AppLogger
 import com.example.depthpaper.core.SensorFilter
 import com.example.depthpaper.data.ClockFontStyle
 import com.example.depthpaper.data.ProjectRepository
@@ -166,10 +167,12 @@ class ParallaxWallpaperService : WallpaperService() {
             val proj = repository.getActiveProject()
             if (proj != null && proj.id != activeProject?.id) {
                 activeProject = proj
+                AppLogger.i("WallpaperService", "Active project loaded: ${proj.title} (${proj.id}), mode=${proj.renderMode}")
                 bgBitmap = repository.loadBitmap(proj.inpaintedBackgroundPath)
                     ?: repository.loadBitmap(proj.sourceImagePath)
                 fgBitmap = repository.loadBitmap(proj.cutoutImagePath)
                 depthBitmap = repository.loadBitmap(proj.depthMapPath)
+                AppLogger.i("WallpaperService", "Plates loaded: bg=${bgBitmap != null}, fg=${fgBitmap != null}, depth=${depthBitmap != null}")
             }
         }
 

@@ -92,6 +92,7 @@ class SegmentationEngine(private val context: Context) {
 
         val w = safeBmp.width
         val h = safeBmp.height
+        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h}, config=${safeBmp.config}, threshold=$threshold")
 
         // 1. Run ML inference
         val (rawMask, maskW, maskH) = runInference(safeBmp)
@@ -114,6 +115,7 @@ class SegmentationEngine(private val context: Context) {
         }
         val fgRatio = fgCount.toFloat() / totalPixels
         val isPortrait = fgRatio in 0.05f..0.85f
+        AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
         // 4. Generate Foreground Cutout Bitmap with Alpha Channel
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -206,6 +208,7 @@ class SegmentationEngine(private val context: Context) {
                         val byteBuffer = ByteBufferExtractor.extract(maskList[1])
                         byteBuffer.rewind()
                         byteBuffer.asFloatBuffer().get(floatArray)
+                        AppLogger.i("SegmentationEngine", "2-mask inference success: ${mW}x${mH}")
                         return Triple(floatArray, mW, mH)
                     } else if (maskList.size > 2) {
                         // Multiclass: index 0 is background, 1..5 are human classes (hair, skin, clothes)
@@ -216,20 +219,23 @@ class SegmentationEngine(private val context: Context) {
                         for (i in 0 until totalPixels) {
                             floatArray[i] = (1f - fb.get(i)).coerceIn(0f, 1f)
                         }
+                        AppLogger.i("SegmentationEngine", "Multiclass (${maskList.size} classes) inference success: ${mW}x${mH}")
                         return Triple(floatArray, mW, mH)
                     } else {
                         val byteBuffer = ByteBufferExtractor.extract(maskList[0])
                         byteBuffer.rewind()
                         byteBuffer.asFloatBuffer().get(floatArray)
+                        AppLogger.i("SegmentationEngine", "Single mask inference success: ${mW}x${mH}")
                         return Triple(floatArray, mW, mH)
                     }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                AppLogger.e("SegmentationEngine", "MediaPipe inference failed: ${e.message}", e)
             }
         }
 
         // Algorithmic Fallback (color variance & edge contrast, never circular gradient)
+        AppLogger.w("SegmentationEngine", "Segmenter unavailable or failed. Using fallback color edge filter.")
         val sW = min(256, bitmap.width)
         val sH = min(256, bitmap.height)
         val scaled = Bitmap.createScaledBitmap(bitmap, sW, sH, true)

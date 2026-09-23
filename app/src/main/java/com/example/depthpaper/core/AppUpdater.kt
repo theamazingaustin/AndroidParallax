@@ -34,6 +34,7 @@ object AppUpdater {
      */
     suspend fun checkForUpdate(currentVersion: String = BuildConfig.VERSION_NAME): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
+            AppLogger.i("AppUpdater", "Checking GitHub API for updates. Current version: $currentVersion")
             val url = URL(LATEST_RELEASE_URL)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000
@@ -43,6 +44,7 @@ object AppUpdater {
             }
 
             if (conn.responseCode != 200) {
+                AppLogger.w("AppUpdater", "GitHub API returned HTTP ${conn.responseCode}")
                 return@withContext null
             }
 
@@ -54,7 +56,9 @@ object AppUpdater {
             val cleanRemoteVersion = tagName.removePrefix("v").trim()
             val cleanCurrentVersion = currentVersion.removePrefix("v").trim()
 
-            if (!isVersionNewer(cleanRemoteVersion, cleanCurrentVersion)) {
+            val newer = isVersionNewer(cleanRemoteVersion, cleanCurrentVersion)
+            AppLogger.i("AppUpdater", "Remote tag: $tagName ($cleanRemoteVersion), isNewer: $newer")
+            if (!newer) {
                 return@withContext null
             }
 
