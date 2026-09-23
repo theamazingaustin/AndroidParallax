@@ -4,11 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.ByteBufferExtractor
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenterResult
-import java.nio.ByteBuffer
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -40,8 +41,10 @@ class SegmentationEngine(private val context: Context) {
 
     private fun initSegmenter() {
         try {
+            // Prefer multiclass model for group photos / clothes / hair if available, otherwise selfie_segmenter
+            val modelPath = "models/selfie_multiclass.tflite"
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("models/selfie_segmenter.tflite")
+                .setModelAssetPath(modelPath)
                 .build()
 
             val options = ImageSegmenter.ImageSegmenterOptions.builder()
@@ -51,10 +54,21 @@ class SegmentationEngine(private val context: Context) {
                 .build()
 
             segmenter = ImageSegmenter.createFromOptions(context, options)
-        } catch (e: Exception) {
-            // Log fallback; pure algorithmic fallback will be used if model load fails
-            e.printStackTrace()
-            segmenter = null
+        } catch (_: Exception) {
+            try {
+                val fallbackOptions = BaseOptions.builder()
+                    .setModelAssetPath("models/selfie_segmenter.tflite")
+                    .build()
+                val options = ImageSegmenter.ImageSegmenterOptions.builder()
+                    .setBaseOptions(fallbackOptions)
+                    .setRunningMode(RunningMode.IMAGE)
+                    .setOutputConfidenceMasks(true)
+                    .build()
+                segmenter = ImageSegmenter.createFromOptions(context, options)
+            } catch (e2: Exception) {
+                e2.printStackTrace()
+                segmenter = null
+            }
         }
     }
 
@@ -64,42 +78,48 @@ class SegmentationEngine(private val context: Context) {
      */
     fun processImage(
         sourceBmp: Bitmap,
-        threshold: Float = 0.5f,
+        threshold: Float = 0.45f,
         edgeFeathering: Int = 6,
         maskDilation: Int = 0,
-        inpaintRadius: Int = 14
+        inpaintRadius: Int = 12
     ): SegmentationResult {
-        val w = sourceBmp.width
-        val h = sourceBmp.height
+        // Guarantee software ARGB_8888 bitmap to avoid MediaPipe hardware buffer crashes
+        val safeBmp = if (sourceBmp.config != Bitmap.Config.ARGB_8888 || sourceBmp.isRecycled) {
+            sourceBmp.copy(Bitmap.Config.ARGB_8888, false)
+        } else {
+            sourceBmp
+        }
 
-        // 1. Run ML inference or fallback
-        val (rawMask, maskW, maskH) = runInference(sourceBmp)
+        val w = safeBmp.width
+        val h = safeBmp.height
 
-        // 2. High-resolution color guided filter to refine edges
+        // 1. Run ML inference
+        val (rawMask, maskW, maskH) = runInference(safeBmp)
+
+        // 2. High-resolution color guided filter to refine edges against source RGB
         val refinedMask = GuidedMattingFilter.filter(
-            guideBmp = sourceBmp,
+            guideBmp = safeBmp,
             rawMask = rawMask,
             maskWidth = maskW,
             maskHeight = maskH,
-            radius = max(2, edgeFeathering),
+            radius = max(3, edgeFeathering),
             eps = 0.005f
         )
 
-        // 3. Analyze saliency & auto-detect portrait
+        // 3. Saliency check
         var fgCount = 0
         val totalPixels = maskW * maskH
         for (i in 0 until totalPixels) {
             if (refinedMask[i] >= threshold) fgCount++
         }
         val fgRatio = fgCount.toFloat() / totalPixels
-        // Portrait heuristic: prominent subject occupying between 12% and 75% of canvas
-        val isPortrait = fgRatio in 0.12f..0.75f
+        val isPortrait = fgRatio in 0.05f..0.85f
 
         // 4. Generate Foreground Cutout Bitmap with Alpha Channel
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
         val cutoutPixels = IntArray(w * h)
-        sourceBmp.getPixels(sourcePixels, 0, w, 0, 0, w, h)
+        safeBmp.getPixels(sourcePixels, 0, w, 0, 0, w, h)
 
         val scaleX = maskW.toFloat() / w
         val scaleY = maskH.toFloat() / h
@@ -112,12 +132,14 @@ class SegmentationEngine(private val context: Context) {
                 val mx = min(maskW - 1, (x * scaleX).toInt())
                 val confidence = refinedMask[maskRow + mx]
 
-                // Apply threshold and smooth alpha curve
-                val alpha = if (confidence < threshold) {
-                    0
-                } else {
-                    val normalized = (confidence - threshold) / (1f - threshold)
-                    (min(1f, normalized * 1.2f) * 255).toInt()
+                // Smooth alpha ramp
+                val alpha = when {
+                    confidence <= threshold * 0.7f -> 0
+                    confidence >= threshold * 1.3f -> 255
+                    else -> {
+                        val norm = (confidence - threshold * 0.7f) / (threshold * 0.6f)
+                        (norm.coerceIn(0f, 1f) * 255).toInt()
+                    }
                 }
 
                 val rgb = sourcePixels[rowOffset + x] and 0x00FFFFFF
@@ -136,18 +158,17 @@ class SegmentationEngine(private val context: Context) {
             for (x in 0 until w) {
                 val mx = min(maskW - 1, (x * scaleX).toInt())
                 val conf = refinedMask[maskRow + mx]
-                // Background depth gradient (distant top to near bottom) blended with foreground prominence
-                val backgroundDepth = (y.toFloat() / h) * 0.4f
-                val totalDepth = min(1f, conf * 0.8f + backgroundDepth * (1f - conf))
-                val gray = (totalDepth * 255).toInt()
+                val bgGradient = (y.toFloat() / h) * 0.35f
+                val depthVal = (conf * 0.85f + bgGradient * (1f - conf)).coerceIn(0f, 1f)
+                val gray = (depthVal * 255).toInt()
                 depthPixels[rowOffset + x] = Color.rgb(gray, gray, gray)
             }
         }
         depthBmp.setPixels(depthPixels, 0, w, 0, 0, w, h)
 
-        // 6. Generate Inpainted Background Plate
+        // 6. Inpainted background plate
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
-            sourceBmp = sourceBmp,
+            sourceBmp = safeBmp,
             mask = refinedMask,
             maskWidth = maskW,
             maskHeight = maskH,
@@ -174,22 +195,41 @@ class SegmentationEngine(private val context: Context) {
                 val result: ImageSegmenterResult = seg.segment(mpImage)
                 val masks = result.confidenceMasks()
                 if (masks.isPresent && masks.get().isNotEmpty()) {
-                    val mask = masks.get()[0]
-                    val mW = mask.width
-                    val mH = mask.height
-                    val byteBuffer = com.google.mediapipe.framework.image.ByteBufferExtractor.extract(mask)
-                    val floatArray = FloatArray(mW * mH)
-                    byteBuffer.rewind()
-                    val fb = byteBuffer.asFloatBuffer()
-                    fb.get(floatArray)
-                    return Triple(floatArray, mW, mH)
+                    val maskList = masks.get()
+                    val mW = maskList[0].width
+                    val mH = maskList[0].height
+                    val totalPixels = mW * mH
+                    val floatArray = FloatArray(totalPixels)
+
+                    if (maskList.size == 2) {
+                        // Two masks: index 0 is background, index 1 is person foreground!
+                        val byteBuffer = ByteBufferExtractor.extract(maskList[1])
+                        byteBuffer.rewind()
+                        byteBuffer.asFloatBuffer().get(floatArray)
+                        return Triple(floatArray, mW, mH)
+                    } else if (maskList.size > 2) {
+                        // Multiclass: index 0 is background, 1..5 are human classes (hair, skin, clothes)
+                        // Foreground probability is 1.0 - P(background)
+                        val bgBuffer = ByteBufferExtractor.extract(maskList[0])
+                        bgBuffer.rewind()
+                        val fb = bgBuffer.asFloatBuffer()
+                        for (i in 0 until totalPixels) {
+                            floatArray[i] = (1f - fb.get(i)).coerceIn(0f, 1f)
+                        }
+                        return Triple(floatArray, mW, mH)
+                    } else {
+                        val byteBuffer = ByteBufferExtractor.extract(maskList[0])
+                        byteBuffer.rewind()
+                        byteBuffer.asFloatBuffer().get(floatArray)
+                        return Triple(floatArray, mW, mH)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
 
-        // Heuristic Saliency & Depth Fallback (100% offline, zero crash guarantee)
+        // Algorithmic Fallback (color variance & edge contrast, never circular gradient)
         val sW = min(256, bitmap.width)
         val sH = min(256, bitmap.height)
         val scaled = Bitmap.createScaledBitmap(bitmap, sW, sH, true)
@@ -198,23 +238,20 @@ class SegmentationEngine(private val context: Context) {
         if (scaled != bitmap && !scaled.isRecycled) scaled.recycle()
 
         val mask = FloatArray(sW * sH)
-        val cx = sW / 2f
-        val cy = sH / 2f
-        val maxDist = kotlin.math.sqrt(cx * cx + cy * cy)
-
         for (y in 0 until sH) {
             for (x in 0 until sW) {
                 val idx = y * sW + x
                 val c = pixels[idx]
-                val r = c shr 16 and 0xFF
-                val g = c shr 8 and 0xFF
-                val b = c and 0xFF
-                // Center-weighted skin/object saliency
-                val dx = (x - cx) / cx
-                val dy = (y - cy) / cy
-                val distFactor = max(0f, 1f - (dx * dx + dy * dy))
-                val isWarm = if (r > g && g > b) 0.3f else 0.0f
-                mask[idx] = min(1f, distFactor * 0.7f + isWarm)
+                val r = (c shr 16 and 0xFF) / 255f
+                val g = (c shr 8 and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val lum = 0.299f * r + 0.587f * g + 0.114f * b
+                // Saturation/contrast heuristic
+                val maxC = max(r, max(g, b))
+                val minC = min(r, min(g, b))
+                val sat = if (maxC == 0f) 0f else (maxC - minC) / maxC
+                val yWeight = if (y < sH * 0.7f) 0.6f else 0.2f
+                mask[idx] = (sat * 0.6f + (1f - lum) * 0.4f) * yWeight
             }
         }
         return Triple(mask, sW, sH)

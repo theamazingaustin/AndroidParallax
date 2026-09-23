@@ -174,6 +174,18 @@ class StudioViewModel(
         _uiState.value = _uiState.value.copy(currentProject = updated)
     }
 
+    fun updateClockPosition(xPercent: Float, yPercent: Float) {
+        val cur = _uiState.value.currentProject
+        val updated = cur.copy(
+            lockScreenConfig = cur.lockScreenConfig.copy(
+                horizontalOffsetPercent = xPercent.coerceIn(0.15f, 0.85f),
+                verticalOffsetPercent = yPercent.coerceIn(0.08f, 0.70f)
+            )
+        )
+        repository.saveProjectMetaOnly(updated)
+        _uiState.value = _uiState.value.copy(currentProject = updated)
+    }
+
     fun updateClockVerticalOffset(offsetPercent: Float) {
         val cur = _uiState.value.currentProject
         val updated = cur.copy(lockScreenConfig = cur.lockScreenConfig.copy(verticalOffsetPercent = offsetPercent))

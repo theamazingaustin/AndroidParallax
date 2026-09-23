@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -74,9 +76,13 @@ fun ProjectGalleryScreen(
 ) {
     val activeProject = projects.firstOrNull { it.isActive }
     val favoriteProjects = projects.filter { it.isFavorite && !it.isActive }
-    val otherProjects = projects.filter { !it.isActive && !it.isFavorite }
-
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF0F0F1A))) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F0F1A))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp),

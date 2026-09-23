@@ -22,6 +22,7 @@ data class LockScreenConfig(
     val clockColorHex: Long = 0xFFFFFFFF,
     val clockScale: Float = 1.0f,
     val verticalOffsetPercent: Float = 0.18f,
+    val horizontalOffsetPercent: Float = 0.5f,
     val subjectInFrontOfClock: Boolean = true,
     val showDate: Boolean = true,
     val dateFormat: String = "EEEE, MMMM d",
@@ -32,6 +33,7 @@ data class LockScreenConfig(
         put("clockColorHex", clockColorHex)
         put("clockScale", clockScale.toDouble())
         put("verticalOffsetPercent", verticalOffsetPercent.toDouble())
+        put("horizontalOffsetPercent", horizontalOffsetPercent.toDouble())
         put("subjectInFrontOfClock", subjectInFrontOfClock)
         put("showDate", showDate)
         put("dateFormat", dateFormat)
@@ -44,6 +46,7 @@ data class LockScreenConfig(
             clockColorHex = json.optLong("clockColorHex", 0xFFFFFFFF),
             clockScale = json.optDouble("clockScale", 1.0).toFloat(),
             verticalOffsetPercent = json.optDouble("verticalOffsetPercent", 0.18).toFloat(),
+            horizontalOffsetPercent = json.optDouble("horizontalOffsetPercent", 0.5).toFloat(),
             subjectInFrontOfClock = json.optBoolean("subjectInFrontOfClock", true),
             showDate = json.optBoolean("showDate", true),
             dateFormat = json.optString("dateFormat", "EEEE, MMMM d"),

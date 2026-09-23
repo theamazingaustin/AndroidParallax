@@ -210,17 +210,31 @@ class ParallaxWallpaperService : WallpaperService() {
             val tiltX = currentNormX * maxShiftPx + pageShift
             val tiltY = currentNormY * maxShiftPx
 
-            // Overscan zoom scale so tilt never reveals empty canvas borders
+            // Center-crop aspect ratio calculation
+            val refBmp = bgBitmap ?: fgBitmap
+            val imgW = refBmp?.width?.toFloat() ?: 1080f
+            val imgH = refBmp?.height?.toFloat() ?: 2400f
+
             val overscan = 1.08f
-            val baseRect = RectF(-w * (overscan - 1f) / 2f, -h * (overscan - 1f) / 2f, w * (1f + (overscan - 1f) / 2f), h * (1f + (overscan - 1f) / 2f))
+            val scale = max((w * overscan) / imgW, (h * overscan) / imgH)
+            val drawW = imgW * scale
+            val drawH = imgH * scale
+            val baseLeft = (w - drawW) / 2f
+            val baseTop = (h - drawH) / 2f
 
-            // 1. Draw Background Layer (shifted in reverse / slower)
-            val bgShiftX = -tiltX * 0.4f
-            val bgShiftY = -tiltY * 0.4f
-            val bgDest = RectF(baseRect.left + bgShiftX, baseRect.top + bgShiftY, baseRect.right + bgShiftX, baseRect.bottom + bgShiftY)
+            // Both background and cutout move at the same position to prevent duplicate ghosting
+            val photoShiftX = tiltX * 0.4f
+            val photoShiftY = tiltY * 0.4f
+            val photoDest = RectF(
+                baseLeft + photoShiftX,
+                baseTop + photoShiftY,
+                baseLeft + photoShiftX + drawW,
+                baseTop + photoShiftY + drawH
+            )
 
+            // 1. Draw Background Layer
             bgBitmap?.let { bmp ->
-                canvas.drawBitmap(bmp, null, bgDest, null)
+                canvas.drawBitmap(bmp, null, photoDest, null)
             } ?: run {
                 canvas.drawColor(Color.parseColor("#1A1A2E"))
             }
@@ -233,14 +247,14 @@ class ParallaxWallpaperService : WallpaperService() {
             }
 
             // 2. Clock Layer (interleaved at midground depth)
-            val clockShiftX = -tiltX * 0.15f
-            val clockShiftY = -tiltY * 0.15f
+            val clockShiftX = photoShiftX * 0.35f
+            val clockShiftY = photoShiftY * 0.35f
 
             val drawClockAction = {
                 if (showClock) {
                     val cfg = project.lockScreenConfig
                     val clockY = h * cfg.verticalOffsetPercent + clockShiftY
-                    val clockX = (w / 2f) + clockShiftX
+                    val clockX = w * cfg.horizontalOffsetPercent + clockShiftX
 
                     // Date above clock
                     if (cfg.showDate) {
@@ -248,7 +262,7 @@ class ParallaxWallpaperService : WallpaperService() {
                         datePaint.textSize = w * 0.045f * cfg.clockScale
                         datePaint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
                         val dateStr = SimpleDateFormat(cfg.dateFormat, Locale.getDefault()).format(Date())
-                        canvas.drawText(dateStr, clockX, clockY - (w * 0.18f * cfg.clockScale), datePaint)
+                        canvas.drawText(dateStr, clockX, clockY - (w * 0.17f * cfg.clockScale), datePaint)
                     }
 
                     // Main Time
@@ -265,13 +279,9 @@ class ParallaxWallpaperService : WallpaperService() {
                 drawClockAction()
             }
 
-            // 3. Foreground Subject Cutout (shifted with highest parallax offset)
-            val fgShiftX = tiltX * 0.8f
-            val fgShiftY = tiltY * 0.8f
-            val fgDest = RectF(baseRect.left + fgShiftX, baseRect.top + fgShiftY, baseRect.right + fgShiftX, baseRect.bottom + fgShiftY)
-
+            // 3. Foreground Subject Cutout (drawn at identical coordinates)
             fgBitmap?.let { bmp ->
-                canvas.drawBitmap(bmp, null, fgDest, null)
+                canvas.drawBitmap(bmp, null, photoDest, null)
             }
 
             // If clock is in front of subject, draw clock after
