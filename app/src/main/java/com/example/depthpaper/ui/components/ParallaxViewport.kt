@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -73,8 +74,10 @@ fun ParallaxViewport(
         }
     }
 
-    // Gyroscope tracking
-    DisposableEffect(project) {
+    val currentMotionConfig by rememberUpdatedState(project.motionConfig)
+
+    // Gyroscope tracking (runs continuously without disposing on project metadata updates)
+    DisposableEffect(Unit) {
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val rotSensor = sm?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -91,12 +94,13 @@ fun ParallaxViewport(
                     val pitchDeg = Math.toDegrees(orientation[1].toDouble()).toFloat()
                     val rollDeg = Math.toDegrees(orientation[2].toDouble()).toFloat()
 
-                    sensorFilter.smoothingFactor = project.motionConfig.sensorSmoothing
-                    sensorFilter.maxAngleDegrees = project.motionConfig.maxTiltAngle
+                    val cfg = currentMotionConfig
+                    sensorFilter.smoothingFactor = cfg.sensorSmoothing
+                    sensorFilter.maxAngleDegrees = cfg.maxTiltAngle
 
                     val (nx, ny) = sensorFilter.update(rollDeg, pitchDeg)
-                    val signX = if (project.motionConfig.invertX) -1f else 1f
-                    val signY = if (project.motionConfig.invertY) -1f else 1f
+                    val signX = if (cfg.invertX) -1f else 1f
+                    val signY = if (cfg.invertY) -1f else 1f
 
                     sensorTiltX = nx * signX
                     sensorTiltY = ny * signY
@@ -266,20 +270,22 @@ fun ParallaxViewport(
             // Clock is midground (0.35x)
             // Cutout subject is nearest (0.55x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
-            val bgShiftX = if (isLayeredMode) shiftX * 0.15f else shiftX * 0.35f
-            val bgShiftY = if (isLayeredMode) shiftY * 0.15f else shiftY * 0.35f
-            val clockShiftX = shiftX * 0.35f
-            val clockShiftY = shiftY * 0.35f
-            val fgShiftX = if (isLayeredMode) shiftX * 0.55f else shiftX * 0.35f
-            val fgShiftY = if (isLayeredMode) shiftY * 0.55f else shiftY * 0.35f
+            // Apple-style depth parallax: photo and subject tilt in unified camera perspective (0.35x),
+            // while the clock glides at virtual midground depth (0.15x) behind the subject.
+            val bgShiftX = shiftX * 0.35f
+            val bgShiftY = shiftY * 0.35f
+            val fgShiftX = shiftX * 0.35f
+            val fgShiftY = shiftY * 0.35f
+            val clockShiftX = shiftX * 0.15f
+            val clockShiftY = shiftY * 0.15f
 
             val bgLeft = baseLeft + bgShiftX.roundToInt()
             val bgTop = baseTop + bgShiftY.roundToInt()
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
 
-            // 1. Draw Background Photo Plate
-            val bgBmp = backgroundBmp ?: sourceBmp
+            // 1. Draw Background Photo Plate (In Layered 2.5D mode, sourceBmp is 100% pristine original photo with zero distortion!)
+            val bgBmp = if (isLayeredMode) (sourceBmp ?: backgroundBmp) else (backgroundBmp ?: sourceBmp)
             bgBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),

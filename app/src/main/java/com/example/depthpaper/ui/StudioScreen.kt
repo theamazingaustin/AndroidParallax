@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,6 +57,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -63,6 +67,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -70,6 +75,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +87,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.example.depthpaper.core.AppLogger
 import com.example.depthpaper.core.SegmentationModelType
 import com.example.depthpaper.data.ClockFontStyle
@@ -115,19 +122,45 @@ fun StudioScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF0A0A12))
-            .statusBarsPadding()
-            .navigationBarsPadding()
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val coroutineScope = rememberCoroutineScope()
 
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 88.dp,
+        sheetContainerColor = Color(0xFF141422),
+        sheetContentColor = Color.White,
+        sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        sheetShadowElevation = 16.dp,
+        sheetTonalElevation = 8.dp,
+        sheetDragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .background(Color(0xFF4A4A65), RoundedCornerShape(2.dp))
+            )
+        },
+        sheetContent = {
+            StudioBottomControlPanel(
+                viewModel = viewModel,
+                state = state,
+                onPickPhoto = { photoPickerLauncher.launch("image/*") },
+                onTabSelected = {
+                    coroutineScope.launch {
+                        scaffoldState.bottomSheetState.expand()
+                    }
+                }
+            )
+        },
+        containerColor = Color(0xFF0A0A12),
+        topBar = {
             // Top Action Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -188,92 +221,88 @@ fun StudioScreen(
                     }
                 }
             }
+        },
+        modifier = modifier.fillMaxSize()
+    ) { innerPadding ->
+        // Phone-proportioned Interactive Preview Canvas (Full-screen sized)
+        val configuration = LocalConfiguration.current
+        val phoneAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.toFloat()).coerceIn(0.42f, 0.65f)
 
-            // Phone-proportioned Interactive Preview (scaled down slightly to match user device)
-            val configuration = LocalConfiguration.current
-            val phoneAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.toFloat()).coerceIn(0.42f, 0.65f)
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1.0f)
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
-                        .clip(RoundedCornerShape(26.dp))
-                        .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
-                        .background(Color.Black)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
                 ) {
-                    ParallaxViewport(
-                        project = state.currentProject,
-                        previewSurface = state.previewSurface,
-                        sourceBmp = state.sourceBitmap,
-                        cutoutBmp = state.cutoutBitmap,
-                        backgroundBmp = state.backgroundBitmap,
-                        depthBmp = state.depthBitmap,
-                        simulatedTiltX = state.simulatedTiltX,
-                        simulatedTiltY = state.simulatedTiltY,
-                        onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
-                        onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    // Processing overlay
-                    if (state.isProcessing) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.65f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = state.statusMessage ?: "AI processing on-device...",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
+                    // Tap on preview canvas collapses expanded bottom sheet
+                    if (scaffoldState.bottomSheetState.currentValue == SheetValue.Expanded) {
+                        coroutineScope.launch {
+                            scaffoldState.bottomSheetState.partialExpand()
                         }
                     }
-
-                    // Drag hint pill at bottom of viewport
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 12.dp)
-                    ) {
-                        Text(
-                            text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Combined Bottom Control Panel
+                },
+            contentAlignment = Alignment.Center
+        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1.05f)
+                    .fillMaxHeight(0.96f)
+                    .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
+                    .clip(RoundedCornerShape(26.dp))
+                    .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
+                    .background(Color.Black)
             ) {
-                StudioBottomControlPanel(
-                    viewModel = viewModel,
-                    state = state,
-                    onPickPhoto = { photoPickerLauncher.launch("image/*") }
+                ParallaxViewport(
+                    project = state.currentProject,
+                    previewSurface = state.previewSurface,
+                    sourceBmp = state.sourceBitmap,
+                    cutoutBmp = state.cutoutBitmap,
+                    backgroundBmp = state.backgroundBitmap,
+                    depthBmp = state.depthBitmap,
+                    simulatedTiltX = state.simulatedTiltX,
+                    simulatedTiltY = state.simulatedTiltY,
+                    onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
+                    onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
+                    modifier = Modifier.fillMaxSize()
                 )
+
+                // Processing overlay
+                if (state.isProcessing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.65f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = state.statusMessage ?: "AI processing on-device...",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                // Drag hint pill at bottom of viewport
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                ) {
+                    Text(
+                        text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
     }
@@ -288,58 +317,62 @@ fun StudioScreen(
 fun StudioBottomControlPanel(
     viewModel: StudioViewModel,
     state: StudioUiState,
-    onPickPhoto: () -> Unit
+    onPickPhoto: () -> Unit,
+    onTabSelected: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Clock & Wallpaper", "Layers & 3D Motion")
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF141422),
-        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 400.dp, max = 560.dp)
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .navigationBarsPadding()
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color.Transparent,
-                contentColor = Color(0xFF00E5FF),
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = Color(0xFF00E5FF)
-                    )
-                }
-            ) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = if (index == 0) Icons.Default.Schedule else Icons.Default.Layers,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = if (selectedTab == index) Color(0xFF00E5FF) else Color.Gray
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = title,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
+        TabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = Color.Transparent,
+            contentColor = Color(0xFF00E5FF),
+            indicator = { tabPositions ->
+                TabRowDefaults.SecondaryIndicator(
+                    Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                    color = Color(0xFF00E5FF)
+                )
+            }
+        ) {
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == index,
+                    onClick = {
+                        selectedTab = index
+                        onTabSelected()
+                    },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (index == 0) Icons.Default.Schedule else Icons.Default.Layers,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (selectedTab == index) Color(0xFF00E5FF) else Color.Gray
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = title,
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                            )
                         }
-                    )
-                }
+                    }
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            when (selectedTab) {
-                0 -> ClockAndWallpaperTab(viewModel, state, onPickPhoto)
-                1 -> LayersAndMotionTab(viewModel, state)
-            }
+        when (selectedTab) {
+            0 -> ClockAndWallpaperTab(viewModel, state, onPickPhoto)
+            1 -> LayersAndMotionTab(viewModel, state)
         }
     }
 }
@@ -638,15 +671,15 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Sensitivity", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
                     Slider(
-                        value = threshold,
+                        value = threshold.coerceIn(0.35f, 0.75f),
                         onValueChange = { threshold = it },
-                        valueRange = 0.15f..0.85f,
+                        valueRange = 0.35f..0.75f,
                         modifier = Modifier.weight(1f)
                     )
-                    Text("${(threshold * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
+                    Text("${(threshold.coerceIn(0.35f, 0.75f) * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
                 }
                 Text(
-                    text = "Adjusts detection threshold. Lower values capture hair & clothing outlines; higher isolates core subjects tightly. (Subjects remain 100% solid & opaque).",
+                    text = "Adjusts detection threshold (35%–75%). Lower values capture fine hair & clothing contours; higher isolates core subjects tightly. Background sky noise is filtered out for pristine clock visibility.",
                     fontSize = 10.sp,
                     color = Color.Gray
                 )

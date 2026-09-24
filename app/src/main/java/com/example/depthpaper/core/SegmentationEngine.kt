@@ -126,30 +126,21 @@ class SegmentationEngine(private val context: Context) {
         // 1. Run ML inference
         val (rawMask, maskW, maskH) = runInference(safeBmp)
 
-        // 2. High-resolution color guided filter to refine edges against source RGB
-        val refinedMask = GuidedMattingFilter.filter(
-            guideBmp = safeBmp,
-            rawMask = rawMask,
-            maskWidth = maskW,
-            maskHeight = maskH,
-            radius = max(3, edgeFeathering),
-            eps = 0.005f
-        )
-
         // Effective threshold with granular mask expansion / contraction
-        val effectiveThreshold = (threshold - (maskExpansion * 0.02f)).coerceIn(0.05f, 0.95f)
+        // Clamped strictly to 0.35..0.85 so neural background noise (sky, walls) never leaks into cutout!
+        val effectiveThreshold = (threshold - (maskExpansion * 0.015f)).coerceIn(0.35f, 0.85f)
 
-        // 3. Saliency check
+        // 2. Saliency check
         var fgCount = 0
         val totalPixels = maskW * maskH
         for (i in 0 until totalPixels) {
-            if (refinedMask[i] >= effectiveThreshold) fgCount++
+            if (rawMask[i] >= effectiveThreshold) fgCount++
         }
         val fgRatio = fgCount.toFloat() / totalPixels
         val isPortrait = fgRatio in 0.05f..0.85f
         AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
-        // 4. Generate Foreground Cutout Bitmap with Bilinear Alpha Channel
+        // 3. Generate Foreground Cutout Bitmap with Sub-Pixel Bilinear Alpha Channel
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
         val cutoutPixels = IntArray(w * h)
@@ -158,9 +149,11 @@ class SegmentationEngine(private val context: Context) {
         val invW = 1.0f / max(1, w - 1)
         val invH = 1.0f / max(1, h - 1)
 
-        val featherWindow = (edgeFeathering.coerceIn(1, 16) / 16f) * 0.08f
-        val lowBound = (effectiveThreshold - featherWindow).coerceAtLeast(0.01f)
-        val highBound = (effectiveThreshold + featherWindow).coerceAtMost(0.99f)
+        // Tight, crisp anti-aliasing ramp (1-2px wide)
+        // Eliminates wide blurry halos and ghost outlines completely!
+        val featherWindow = (edgeFeathering.coerceIn(1, 16) / 16f) * 0.035f
+        val lowBound = (effectiveThreshold - featherWindow).coerceAtLeast(0.30f)
+        val highBound = (effectiveThreshold + featherWindow).coerceAtMost(0.95f)
         val denom = max(0.001f, highBound - lowBound)
 
         for (y in 0 until h) {
@@ -168,9 +161,9 @@ class SegmentationEngine(private val context: Context) {
             val rowOffset = y * w
             for (x in 0 until w) {
                 val u = x * invW
-                val confidence = InpaintingEngine.sampleMaskBilinear(refinedMask, maskW, maskH, u, v)
+                val confidence = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
 
-                // Robust alpha ramp: guarantees 100% opaque subject for all confidence >= highBound
+                // Sub-pixel alpha ramp: 100% solid inside, pure 0 outside, crisp anti-aliased edge
                 val alpha = when {
                     confidence <= lowBound -> 0
                     confidence >= highBound -> 255
@@ -195,7 +188,7 @@ class SegmentationEngine(private val context: Context) {
         val total = w * h
         AppLogger.i("SegmentationEngine", "Cutout stats: transparent=${transparentCount * 100 / total}%, opaque=${opaqueCount * 100 / total}%")
 
-        // 5. Generate Continuous 3D Depth Map with Bilinear Sampling
+        // 4. Generate Continuous 3D Depth Map with Bilinear Sampling
         val depthBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val depthPixels = IntArray(w * h)
         for (y in 0 until h) {
@@ -203,7 +196,7 @@ class SegmentationEngine(private val context: Context) {
             val rowOffset = y * w
             for (x in 0 until w) {
                 val u = x * invW
-                val conf = InpaintingEngine.sampleMaskBilinear(refinedMask, maskW, maskH, u, v)
+                val conf = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
                 val bgGradient = (y.toFloat() / h) * 0.35f
                 val depthVal = (conf * 0.85f + bgGradient * (1f - conf)).coerceIn(0f, 1f)
                 val gray = (depthVal * 255).toInt()
@@ -212,21 +205,21 @@ class SegmentationEngine(private val context: Context) {
         }
         depthBmp.setPixels(depthPixels, 0, w, 0, 0, w, h)
 
-        // 6. Inpainted background plate with anti-aliased hole and smooth pyramid reconstruction
+        // 5. Inpainted background plate (strictly eroded under subject to avoid outer spill)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
-            mask = refinedMask,
+            mask = rawMask,
             maskWidth = maskW,
             maskHeight = maskH,
             threshold = effectiveThreshold,
-            dilationRadius = inpaintRadius
+            dilationRadius = inpaintRadius.coerceIn(2, 6)
         )
 
         return SegmentationResult(
             foregroundCutout = cutoutBmp,
             inpaintedBackground = inpaintedBmp,
             depthMap = depthBmp,
-            rawMask = refinedMask,
+            rawMask = rawMask,
             maskWidth = maskW,
             maskHeight = maskH,
             isPortraitDetected = isPortrait,

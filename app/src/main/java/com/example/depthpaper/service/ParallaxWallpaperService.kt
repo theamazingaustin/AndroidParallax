@@ -168,8 +168,11 @@ class ParallaxWallpaperService : WallpaperService() {
             if (proj != null && proj.id != activeProject?.id) {
                 activeProject = proj
                 AppLogger.i("WallpaperService", "Active project loaded: ${proj.title} (${proj.id}), mode=${proj.renderMode}")
-                bgBitmap = repository.loadBitmap(proj.inpaintedBackgroundPath)
-                    ?: repository.loadBitmap(proj.sourceImagePath)
+                bgBitmap = if (proj.renderMode == RenderMode.LAYERED_2D) {
+                    repository.loadBitmap(proj.sourceImagePath) ?: repository.loadBitmap(proj.inpaintedBackgroundPath)
+                } else {
+                    repository.loadBitmap(proj.inpaintedBackgroundPath) ?: repository.loadBitmap(proj.sourceImagePath)
+                }
                 fgBitmap = repository.loadBitmap(proj.cutoutImagePath)
                 depthBitmap = repository.loadBitmap(proj.depthMapPath)
                 AppLogger.i("WallpaperService", "Plates loaded: bg=${bgBitmap != null}, fg=${fgBitmap != null}, depth=${depthBitmap != null}")
@@ -233,12 +236,12 @@ class ParallaxWallpaperService : WallpaperService() {
             // Clock is midground (0.35x)
             // Cutout subject is nearest (0.55x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && fgBitmap != null
-            val bgShiftX = if (isLayeredMode) shiftX * 0.15f else shiftX * 0.35f
-            val bgShiftY = if (isLayeredMode) shiftY * 0.15f else shiftY * 0.35f
-            val clockShiftX = shiftX * 0.35f
-            val clockShiftY = shiftY * 0.35f
-            val fgShiftX = if (isLayeredMode) shiftX * 0.55f else shiftX * 0.35f
-            val fgShiftY = if (isLayeredMode) shiftY * 0.55f else shiftY * 0.35f
+            val bgShiftX = shiftX * 0.35f
+            val bgShiftY = shiftY * 0.35f
+            val fgShiftX = shiftX * 0.35f
+            val fgShiftY = shiftY * 0.35f
+            val clockShiftX = shiftX * 0.15f
+            val clockShiftY = shiftY * 0.15f
 
             val bgDest = RectF(
                 baseLeft + bgShiftX,
