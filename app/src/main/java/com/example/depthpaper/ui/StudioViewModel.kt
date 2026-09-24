@@ -7,6 +7,9 @@ import android.content.Intent
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.depthpaper.core.AiModelChoice
+import com.example.depthpaper.core.AiPipelineChoice
+import com.example.depthpaper.core.ProcessingMode
 import com.example.depthpaper.core.SegmentationEngine
 import com.example.depthpaper.core.SegmentationModelType
 import com.example.depthpaper.data.ClockFontStyle
@@ -304,21 +307,35 @@ class StudioViewModel(
         feathering: Int = _uiState.value.currentProject.edgeFeathering,
         maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
         inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
-        modelType: SegmentationModelType? = null,
-        cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast
+        modelType: AiModelChoice? = null,
+        cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
+        processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
+        pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
+        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing
     ) {
         val src = _uiState.value.sourceBitmap ?: return
         _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "Refining segmentation & layers...")
 
         viewModelScope.launch(Dispatchers.Default) {
-            modelType?.let { segmentationEngine.setModelType(it) }
+            val activeModel = modelType ?: _uiState.value.currentProject.selectedModel
+            segmentationEngine.setProcessingMode(processingMode)
+            if (processingMode == ProcessingMode.SINGLE_MODEL) {
+                segmentationEngine.setModelChoice(activeModel)
+            } else {
+                segmentationEngine.setPipelineChoice(pipelineChoice)
+            }
+
             val result = segmentationEngine.processImage(
                 sourceBmp = src,
                 threshold = threshold,
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius,
-                cutoutContrast = cutoutContrast
+                cutoutContrast = cutoutContrast,
+                enablePreprocessing = enablePreprocessing,
+                processingMode = processingMode,
+                modelChoice = activeModel,
+                pipelineChoice = pipelineChoice
             )
 
             val cur = _uiState.value.currentProject.copy(
@@ -326,7 +343,11 @@ class StudioViewModel(
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius,
-                cutoutContrast = cutoutContrast
+                cutoutContrast = cutoutContrast,
+                processingMode = processingMode,
+                selectedModel = activeModel,
+                selectedPipeline = pipelineChoice,
+                enablePreprocessing = enablePreprocessing
             )
 
             val saved = repository.saveProject(
@@ -349,7 +370,9 @@ class StudioViewModel(
         }
     }
 
-    fun getCurrentModelType(): SegmentationModelType = segmentationEngine.currentModelType
+    fun getCurrentModelType(): AiModelChoice = segmentationEngine.currentModelChoice
+    fun getCurrentProcessingMode(): ProcessingMode = segmentationEngine.currentProcessingMode
+    fun getCurrentPipelineChoice(): AiPipelineChoice = segmentationEngine.currentPipelineChoice
 
     fun toggleFavorite(projectId: String) {
         repository.toggleFavorite(projectId)

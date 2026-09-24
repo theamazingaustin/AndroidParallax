@@ -1,5 +1,8 @@
 package com.example.depthpaper.data
 
+import com.example.depthpaper.core.AiModelChoice
+import com.example.depthpaper.core.AiPipelineChoice
+import com.example.depthpaper.core.ProcessingMode
 import org.json.JSONObject
 import java.util.UUID
 
@@ -141,6 +144,10 @@ data class WallpaperProject(
     val imagePanX: Float = 0.0f,
     val imagePanY: Float = 0.0f,
     val cutoutContrast: Float = 0.85f,
+    val processingMode: ProcessingMode = ProcessingMode.PIPELINE,
+    val selectedModel: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
+    val selectedPipeline: AiPipelineChoice = AiPipelineChoice.DUAL_MODEL_HYBRID,
+    val enablePreprocessing: Boolean = true,
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
@@ -166,6 +173,10 @@ data class WallpaperProject(
         put("imagePanX", imagePanX.toDouble())
         put("imagePanY", imagePanY.toDouble())
         put("cutoutContrast", cutoutContrast.toDouble())
+        put("processingMode", processingMode.name)
+        put("selectedModel", selectedModel.name)
+        put("selectedPipeline", selectedPipeline.name)
+        put("enablePreprocessing", enablePreprocessing)
         put("motionConfig", motionConfig.toJson())
         put("lockScreenConfig", lockScreenConfig.toJson())
         put("homeScreenConfig", homeScreenConfig.toJson())
@@ -193,6 +204,10 @@ data class WallpaperProject(
             imagePanX = json.optDouble("imagePanX", 0.0).toFloat(),
             imagePanY = json.optDouble("imagePanY", 0.0).toFloat(),
             cutoutContrast = json.optDouble("cutoutContrast", 0.85).toFloat(),
+            processingMode = runCatching { ProcessingMode.valueOf(json.optString("processingMode", "PIPELINE")) }.getOrDefault(ProcessingMode.PIPELINE),
+            selectedModel = runCatching { AiModelChoice.valueOf(json.optString("selectedModel", "DEPTH_ANYTHING_V2")) }.getOrDefault(AiModelChoice.DEPTH_ANYTHING_V2),
+            selectedPipeline = runCatching { AiPipelineChoice.valueOf(json.optString("selectedPipeline", "DUAL_MODEL_HYBRID")) }.getOrDefault(AiPipelineChoice.DUAL_MODEL_HYBRID),
+            enablePreprocessing = json.optBoolean("enablePreprocessing", true),
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),

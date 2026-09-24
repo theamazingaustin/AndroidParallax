@@ -89,6 +89,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.example.depthpaper.core.AppLogger
+import com.example.depthpaper.core.AiModelChoice
+import com.example.depthpaper.core.AiPipelineChoice
+import com.example.depthpaper.core.ProcessingMode
 import com.example.depthpaper.core.SegmentationModelType
 import com.example.depthpaper.data.ClockFontStyle
 import com.example.depthpaper.data.RenderMode
@@ -565,7 +568,10 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
     var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
-    var selectedModel by remember { mutableStateOf(viewModel.getCurrentModelType()) }
+    var processingMode by remember(project.id, project.processingMode) { mutableStateOf(project.processingMode) }
+    var selectedModel by remember(project.id, project.selectedModel) { mutableStateOf(project.selectedModel) }
+    var selectedPipeline by remember(project.id, project.selectedPipeline) { mutableStateOf(project.selectedPipeline) }
+    var enablePreprocessing by remember(project.id, project.enablePreprocessing) { mutableStateOf(project.enablePreprocessing) }
 
     Column(
         modifier = Modifier
@@ -625,58 +631,135 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 2. AI Segmentation Engine with Explanatory Card
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("AI Segmentation Engine", fontSize = 12.sp, color = Color.Gray)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = selectedModel == SegmentationModelType.ENSEMBLE_DEEPLAB,
-                    onClick = { selectedModel = SegmentationModelType.ENSEMBLE_DEEPLAB },
-                    label = { Text("Ensemble (Smart)", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = selectedModel == SegmentationModelType.GROUP_MULTICLASS,
-                    onClick = { selectedModel = SegmentationModelType.GROUP_MULTICLASS },
-                    label = { Text("Multiclass", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = selectedModel == SegmentationModelType.SELFIE_FAST,
-                    onClick = { selectedModel = SegmentationModelType.SELFIE_FAST },
-                    label = { Text("Selfie", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = selectedModel == SegmentationModelType.UNIVERSAL_SCENERY,
-                    onClick = { selectedModel = SegmentationModelType.UNIVERSAL_SCENERY },
-                    label = { Text("Nature", fontSize = 11.sp) }
+        // 2. Pre-Processing Enhancement Option (Works with ANY model or pipeline)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F38)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Tune, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Pre-Process Image (CLAHE & Bilateral)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    }
+                    Switch(
+                        checked = enablePreprocessing,
+                        onCheckedChange = { enablePreprocessing = it }
+                    )
+                }
+                Text(
+                    text = "Applies Contrast-Limited Adaptive Equalization & Bilateral Denoising prior to inference. Anchors subject contrast gradients and removes sensor grain (crucial for grey hoodies on rocks, dark forest paths, or low lighting).",
+                    fontSize = 11.sp,
+                    color = Color.LightGray
                 )
             }
+        }
 
-            // Detailed Model Clarification Card
+        // 3. AI Processing Engine (Standalone Models & Multi-Model Pipelines)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("AI Processing Engine", fontSize = 12.sp, color = Color.Gray)
+
+            // Section A: Standalone AI Models
+            Text("Standalone AI Models", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0B0C0))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                AiModelChoice.entries.forEach { model ->
+                    FilterChip(
+                        selected = processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == model,
+                        onClick = {
+                            selectedModel = model
+                            processingMode = ProcessingMode.SINGLE_MODEL
+                        },
+                        label = { Text(model.shortLabel, fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            // Section B: Multi-Model High-Precision Pipelines (Visually Separated)
+            Spacer(modifier = Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
+                Text(
+                    "  MULTI-MODEL PIPELINES  ",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF00E5FF)
+                )
+                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                AiPipelineChoice.entries.forEach { pipeline ->
+                    FilterChip(
+                        selected = processingMode == ProcessingMode.PIPELINE && selectedPipeline == pipeline,
+                        onClick = {
+                            selectedPipeline = pipeline
+                            processingMode = ProcessingMode.PIPELINE
+                        },
+                        label = { Text(pipeline.shortLabel, fontSize = 11.sp) }
+                    )
+                }
+            }
+
+            // Detailed Model / Pipeline Clarification Card
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2C)),
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = if (processingMode == ProcessingMode.PIPELINE) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFFFF9100).copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = if (processingMode == ProcessingMode.PIPELINE) "PIPELINE CASCADE" else "STANDALONE MODEL",
+                                color = if (processingMode == ProcessingMode.PIPELINE) Color(0xFF00E5FF) else Color(0xFFFF9100),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.pipelineName else selectedModel.modelName,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
                     Text(
-                        text = when (selectedModel) {
-                            SegmentationModelType.ENSEMBLE_DEEPLAB ->
-                                "Ensemble Smart Engine: Fuses DeepLabV3 (for groups, full-body poses, and waving hands) with portrait neural matting. Sub-pixel Guided Filter snaps to real camera photo edges."
-                            SegmentationModelType.GROUP_MULTICLASS ->
-                                "Multiclass Portrait Engine: Neural segmentation summing individual human body, hair, and clothing layers."
-                            SegmentationModelType.SELFIE_FAST ->
-                                "Selfie Portrait Engine: Ultra-fast binary neural model tuned for close-up portraits."
-                            SegmentationModelType.UNIVERSAL_SCENERY ->
-                                "Universal Nature & Structures: High-frequency edge and chromatic segmentation for scenery, monuments, pets, and objects."
-                        },
+                        text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.bestAt else selectedModel.bestAt,
                         fontSize = 11.sp,
                         color = Color.LightGray
                     )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.license else selectedModel.license,
+                            fontSize = 10.sp,
+                            color = Color(0xFF81C784)
+                        )
+                    }
                 }
             }
         }
@@ -817,7 +900,10 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     maskExpansion = maskExpansion,
                     inpaintRadius = inpaintRadius,
                     modelType = selectedModel,
-                    cutoutContrast = cutoutContrast
+                    cutoutContrast = cutoutContrast,
+                    processingMode = processingMode,
+                    pipelineChoice = selectedPipeline,
+                    enablePreprocessing = enablePreprocessing
                 )
             },
             enabled = !state.isProcessing && state.sourceBitmap != null,
