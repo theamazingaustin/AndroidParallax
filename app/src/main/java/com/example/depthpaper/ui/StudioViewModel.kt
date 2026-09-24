@@ -8,10 +8,10 @@ import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.depthpaper.core.SegmentationEngine
+import com.example.depthpaper.core.SegmentationModelType
 import com.example.depthpaper.data.ClockFontStyle
 import com.example.depthpaper.data.ProjectRepository
 import com.example.depthpaper.data.RenderMode
-import com.example.depthpaper.data.SamplePresets
 import com.example.depthpaper.data.WallpaperProject
 import com.example.depthpaper.service.ParallaxWallpaperService
 import kotlinx.coroutines.Dispatchers
@@ -59,9 +59,12 @@ class StudioViewModel(
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     init {
-        // Initialize default sample projects if library is empty
         viewModelScope.launch(Dispatchers.IO) {
-            SamplePresets.initDefaultProjectsIfEmpty(repository)
+            // Clean up any legacy vector preset projects
+            val legacyTitles = setOf("Cyberpunk Portrait", "Alpine Mountain Vista", "Golden Companion")
+            repository.getAllProjects().filter { it.title in legacyTitles }.forEach {
+                repository.deleteProject(it.id)
+            }
             refreshProjectsList()
             val active = repository.getActiveProject() ?: repository.getAllProjects().firstOrNull()
             active?.let { loadProjectBitmaps(it) }
@@ -113,13 +116,18 @@ class StudioViewModel(
                 isActive = true
             )
 
+            val thumbScale = 480f / maxOf(bitmap.width, bitmap.height)
+            val thumbW = if (thumbScale < 1f) (bitmap.width * thumbScale).toInt() else bitmap.width
+            val thumbH = if (thumbScale < 1f) (bitmap.height * thumbScale).toInt() else bitmap.height
+            val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
+
             val saved = repository.saveProject(
                 project = newProject,
                 sourceBmp = bitmap,
                 cutoutBmp = result.foregroundCutout,
                 inpaintedBgBmp = result.inpaintedBackground,
                 depthBmp = result.depthMap,
-                thumbBmp = bitmap
+                thumbBmp = thumbBmp
             )
 
             repository.setActiveProject(saved.id)
@@ -228,11 +236,17 @@ class StudioViewModel(
         _uiState.value = _uiState.value.copy(currentProject = updated)
     }
 
-    fun reprocessWithTuning(threshold: Float, feathering: Int, inpaintRadius: Int) {
+    fun reprocessWithTuning(
+        threshold: Float = _uiState.value.currentProject.threshold,
+        feathering: Int = _uiState.value.currentProject.edgeFeathering,
+        inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
+        modelType: SegmentationModelType? = null
+    ) {
         val src = _uiState.value.sourceBitmap ?: return
-        _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "Refining edges...")
+        _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "Refining segmentation & layers...")
 
         viewModelScope.launch(Dispatchers.Default) {
+            modelType?.let { segmentationEngine.setModelType(it) }
             val result = segmentationEngine.processImage(
                 sourceBmp = src,
                 threshold = threshold,
@@ -265,6 +279,8 @@ class StudioViewModel(
             }
         }
     }
+
+    fun getCurrentModelType(): SegmentationModelType = segmentationEngine.currentModelType
 
     fun toggleFavorite(projectId: String) {
         repository.toggleFavorite(projectId)

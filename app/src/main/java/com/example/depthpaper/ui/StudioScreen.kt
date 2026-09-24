@@ -32,9 +32,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.Wallpaper
 import com.example.depthpaper.core.AppLogger
+import com.example.depthpaper.core.SegmentationModelType
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,6 +45,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -52,10 +55,13 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -245,7 +251,7 @@ fun StudioBottomControlPanel(
     onPickPhoto: () -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Clock", "Motion", "Surface", "Photos")
+    val tabs = listOf("Clock", "Layers & AI", "Motion", "Surface", "Photos")
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -253,10 +259,11 @@ fun StudioBottomControlPanel(
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
                 contentColor = Color(0xFF00E5FF),
+                edgePadding = 0.dp,
                 indicator = { tabPositions ->
                     TabRowDefaults.SecondaryIndicator(
                         Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
@@ -283,9 +290,10 @@ fun StudioBottomControlPanel(
 
             when (selectedTab) {
                 0 -> ClockControlTab(viewModel, state)
-                1 -> MotionControlTab(viewModel, state)
-                2 -> SurfaceControlTab(viewModel, state)
-                3 -> PhotosTab(viewModel, state, onPickPhoto)
+                1 -> LayersAndAiControlTab(viewModel, state)
+                2 -> MotionControlTab(viewModel, state)
+                3 -> SurfaceControlTab(viewModel, state)
+                4 -> PhotosTab(viewModel, state, onPickPhoto)
             }
         }
     }
@@ -361,6 +369,122 @@ fun ClockControlTab(viewModel: StudioViewModel, state: StudioUiState) {
                 onCheckedChange = { viewModel.toggleSubjectInFrontOfClock() },
                 colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LayersAndAiControlTab(viewModel: StudioViewModel, state: StudioUiState) {
+    val project = state.currentProject
+    var threshold by remember(project.id, project.threshold) { mutableFloatStateOf(project.threshold) }
+    var feathering by remember(project.id, project.edgeFeathering) { mutableIntStateOf(project.edgeFeathering) }
+    var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
+    var selectedModel by remember { mutableStateOf(viewModel.getCurrentModelType()) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 1. Render Mode Switcher
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Layer Render Mode", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = if (project.renderMode == RenderMode.LAYERED_2D) "2.5D Layered Cutout" else "3D Perspective Depth",
+                    fontSize = 11.sp,
+                    color = Color(0xFF00E5FF)
+                )
+            }
+            FilterChip(
+                selected = project.renderMode == RenderMode.LAYERED_2D,
+                onClick = { viewModel.toggleRenderMode() },
+                label = { Text(if (project.renderMode == RenderMode.LAYERED_2D) "2.5D Cutout" else "3D Spatial") }
+            )
+        }
+
+        // 2. AI Model Engine Selector
+        Text("AI Segmentation Engine", fontSize = 11.sp, color = Color.Gray)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedModel == SegmentationModelType.GROUP_MULTICLASS,
+                onClick = { selectedModel = SegmentationModelType.GROUP_MULTICLASS },
+                label = { Text("Group / Multi-Subject", fontSize = 11.sp) }
+            )
+            FilterChip(
+                selected = selectedModel == SegmentationModelType.SELFIE_FAST,
+                onClick = { selectedModel = SegmentationModelType.SELFIE_FAST },
+                label = { Text("Selfie Portrait", fontSize = 11.sp) }
+            )
+        }
+
+        // 3. Threshold Slider
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Sensitivity", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.width(90.dp))
+            Slider(
+                value = threshold,
+                onValueChange = { threshold = it },
+                valueRange = 0.15f..0.85f,
+                modifier = Modifier.weight(1f)
+            )
+            Text("${(threshold * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
+        }
+
+        // 4. Edge Feathering
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Edge Softness", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.width(90.dp))
+            Slider(
+                value = feathering.toFloat(),
+                onValueChange = { feathering = it.toInt() },
+                valueRange = 1f..16f,
+                steps = 15,
+                modifier = Modifier.weight(1f)
+            )
+            Text("${feathering}px", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
+        }
+
+        // 5. Inpaint Occlusion Hole Fill Radius
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Inpaint Fill", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.width(90.dp))
+            Slider(
+                value = inpaintRadius.toFloat(),
+                onValueChange = { inpaintRadius = it.toInt() },
+                valueRange = 4f..30f,
+                steps = 26,
+                modifier = Modifier.weight(1f)
+            )
+            Text("${inpaintRadius}px", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
+        }
+
+        // 6. Action Button
+        Button(
+            onClick = {
+                viewModel.reprocessWithTuning(
+                    threshold = threshold,
+                    feathering = feathering,
+                    inpaintRadius = inpaintRadius,
+                    modelType = selectedModel
+                )
+            },
+            enabled = !state.isProcessing && state.sourceBitmap != null,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (state.isProcessing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = Color.Black,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Segmenting On-Device...", color = Color.Black, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Re-Segment & Update Layers", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -459,13 +583,34 @@ fun PhotosTab(viewModel: StudioViewModel, state: StudioUiState, onPickPhoto: () 
         Text("Switch Wallpaper Project", fontSize = 11.sp, color = Color.Gray)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(state.allProjects, key = { it.id }) { proj ->
-                ProjectScreenshotCard(
-                    project = proj,
-                    isCompact = true,
-                    onCardClick = { viewModel.selectProject(proj) },
-                    onSetActiveClick = { /* Set active in studio */ },
-                    onFavoriteClick = { viewModel.toggleFavorite(proj.id) }
-                )
+                Box(
+                    modifier = Modifier
+                        .width(90.dp)
+                        .aspectRatio(9f / 16f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(
+                            width = if (proj.id == state.currentProject.id) 2.dp else 1.dp,
+                            color = if (proj.id == state.currentProject.id) Color(0xFF00E5FF) else Color(0xFF333348),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { viewModel.selectProject(proj) }
+                ) {
+                    ProjectThumbnail(
+                        path = proj.thumbnailPath.ifBlank { proj.sourceImagePath },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Text(
+                        text = proj.title,
+                        fontSize = 10.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .background(Color(0xAA000000))
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                    )
+                }
             }
         }
     }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,15 @@ fun ParallaxViewport(
     val sensorFilter = remember { SensorFilter() }
 
     var isDraggingClock by remember { mutableStateOf(false) }
+    var currentClockX by remember(project.id) { mutableFloatStateOf(project.lockScreenConfig.horizontalOffsetPercent) }
+    var currentClockY by remember(project.id) { mutableFloatStateOf(project.lockScreenConfig.verticalOffsetPercent) }
+
+    LaunchedEffect(project.lockScreenConfig.horizontalOffsetPercent, project.lockScreenConfig.verticalOffsetPercent) {
+        if (!isDraggingClock) {
+            currentClockX = project.lockScreenConfig.horizontalOffsetPercent
+            currentClockY = project.lockScreenConfig.verticalOffsetPercent
+        }
+    }
 
     // Gyroscope tracking
     DisposableEffect(project) {
@@ -109,18 +119,20 @@ fun ParallaxViewport(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(project.lockScreenConfig) {
+            .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         val cfg = project.lockScreenConfig
-                        val clockTargetX = size.width * cfg.horizontalOffsetPercent
-                        val clockTargetY = size.height * cfg.verticalOffsetPercent
-                        val hitRadiusX = size.width * 0.40f * cfg.clockScale
-                        val hitRadiusY = size.height * 0.12f * cfg.clockScale
+                        val clockTargetX = size.width * currentClockX
+                        val clockTargetY = size.height * currentClockY
+                        val hitRadiusX = size.width * 0.45f * cfg.clockScale
+                        // Clock text baseline is at clockTargetY, digits & date extend above
+                        val boxTop = clockTargetY - (size.width * 0.28f * cfg.clockScale)
+                        val boxBottom = clockTargetY + 40f
 
                         // If user touched within the clock bounding box, enter clock-drag mode
                         if (offset.x in (clockTargetX - hitRadiusX)..(clockTargetX + hitRadiusX) &&
-                            offset.y in (clockTargetY - hitRadiusY)..(clockTargetY + hitRadiusY)
+                            offset.y in boxTop..boxBottom
                         ) {
                             isDraggingClock = true
                         } else {
@@ -128,20 +140,24 @@ fun ParallaxViewport(
                         }
                     },
                     onDragEnd = {
+                        if (isDraggingClock) {
+                            onClockPositionChanged(currentClockX, currentClockY)
+                        }
                         isDraggingClock = false
                         onTiltChanged(0f, 0f)
                     },
                     onDragCancel = {
+                        if (isDraggingClock) {
+                            onClockPositionChanged(currentClockX, currentClockY)
+                        }
                         isDraggingClock = false
                         onTiltChanged(0f, 0f)
                     }
                 ) { change, dragAmount ->
                     change.consume()
                     if (isDraggingClock) {
-                        // Direct finger dragging of the clock!
-                        val newX = (project.lockScreenConfig.horizontalOffsetPercent + dragAmount.x / size.width).coerceIn(0.15f, 0.85f)
-                        val newY = (project.lockScreenConfig.verticalOffsetPercent + dragAmount.y / size.height).coerceIn(0.08f, 0.65f)
-                        onClockPositionChanged(newX, newY)
+                        currentClockX = (currentClockX + dragAmount.x / size.width).coerceIn(0.10f, 0.90f)
+                        currentClockY = (currentClockY + dragAmount.y / size.height).coerceIn(0.06f, 0.85f)
                     } else {
                         // Dragging scene tilts the 3D parallax
                         val dx = (dragAmount.x / size.width) * 3f
@@ -170,7 +186,6 @@ fun ParallaxViewport(
                     drawImage(
                         image = bmp.asImageBitmap(),
                         dstOffset = IntOffset(left, top),
-                        dstSize = IntSize(dW.roundToInt(), dH.roundToInt()),
                         alpha = 0.30f
                     )
                 }
@@ -186,8 +201,8 @@ fun ParallaxViewport(
                     val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
                     nativeCanvas.nativeCanvas.drawText(
                         timeStr,
-                        canvasW * project.lockScreenConfig.horizontalOffsetPercent,
-                        canvasH * project.lockScreenConfig.verticalOffsetPercent,
+                        canvasW * currentClockX,
+                        canvasH * currentClockY,
                         paint
                     )
                 }
@@ -211,19 +226,31 @@ fun ParallaxViewport(
             val drawH = (imgH * scale).roundToInt()
             val baseLeft = ((canvasW - drawW) / 2f).roundToInt()
             val baseTop = ((canvasH - drawH) / 2f).roundToInt()
-
-            // Photo position: both background and cutout move at the EXACT SAME POSITION
-            // (eliminates the duplicate mirror image completely!)
-            val photoLeft = baseLeft + shiftX.roundToInt()
-            val photoTop = baseTop + shiftY.roundToInt()
             val drawSize = IntSize(drawW, drawH)
+
+            // Positive differential parallax:
+            // Background is furthest away (0.15x)
+            // Clock is midground (0.35x)
+            // Cutout subject is nearest (0.55x)
+            val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
+            val bgShiftX = if (isLayeredMode) shiftX * 0.15f else shiftX * 0.35f
+            val bgShiftY = if (isLayeredMode) shiftY * 0.15f else shiftY * 0.35f
+            val clockShiftX = shiftX * 0.35f
+            val clockShiftY = shiftY * 0.35f
+            val fgShiftX = if (isLayeredMode) shiftX * 0.55f else shiftX * 0.35f
+            val fgShiftY = if (isLayeredMode) shiftY * 0.55f else shiftY * 0.35f
+
+            val bgLeft = baseLeft + bgShiftX.roundToInt()
+            val bgTop = baseTop + bgShiftY.roundToInt()
+            val fgLeft = baseLeft + fgShiftX.roundToInt()
+            val fgTop = baseTop + fgShiftY.roundToInt()
 
             // 1. Draw Background Photo Plate
             val bgBmp = backgroundBmp ?: sourceBmp
             bgBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),
-                    dstOffset = IntOffset(photoLeft, photoTop),
+                    dstOffset = IntOffset(bgLeft, bgTop),
                     dstSize = drawSize
                 )
             }
@@ -245,8 +272,8 @@ fun ParallaxViewport(
                     val clockShiftX = shiftX * 0.35f
                     val clockShiftY = shiftY * 0.35f
 
-                    val clockX = canvasW * cfg.horizontalOffsetPercent + clockShiftX
-                    val clockY = canvasH * cfg.verticalOffsetPercent + clockShiftY
+                    val clockX = canvasW * currentClockX + clockShiftX
+                    val clockY = canvasH * currentClockY + clockShiftY
 
                     drawIntoCanvas { nativeCanvas ->
                         val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -292,9 +319,9 @@ fun ParallaxViewport(
                                 strokeWidth = 3f
                                 pathEffect = DashPathEffect(floatArrayOf(12f, 12f), 0f)
                             }
-                            val boxHalfW = canvasW * 0.35f * cfg.clockScale
-                            val boxTop = clockY - (canvasW * 0.22f * cfg.clockScale)
-                            val boxBottom = clockY + 16f
+                            val boxHalfW = canvasW * 0.38f * cfg.clockScale
+                            val boxTop = clockY - (canvasW * 0.24f * cfg.clockScale)
+                            val boxBottom = clockY + 24f
                             nativeCanvas.nativeCanvas.drawRoundRect(
                                 clockX - boxHalfW, boxTop, clockX + boxHalfW, boxBottom,
                                 20f, 20f, guidePaint
@@ -309,11 +336,11 @@ fun ParallaxViewport(
                 drawClock()
             }
 
-            // 3. Draw Foreground Cutout Plate (drawn at exact same photoLeft, photoTop)
+            // 3. Draw Foreground Cutout Plate (drawn at foreground depth offset)
             cutoutBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),
-                    dstOffset = IntOffset(photoLeft, photoTop),
+                    dstOffset = IntOffset(fgLeft, fgTop),
                     dstSize = drawSize
                 )
             }

@@ -10,8 +10,14 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
 import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenterResult
 import java.io.File
+import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
+
+enum class SegmentationModelType(val assetPath: String, val displayName: String) {
+    GROUP_MULTICLASS("models/selfie_multiclass.tflite", "Group & Multiclass"),
+    SELFIE_FAST("models/selfie_segmenter.tflite", "Selfie Fast")
+}
 
 /**
  * Result bundle containing both Layered 2.5D cutouts and 3D depth representations.
@@ -34,17 +40,26 @@ data class SegmentationResult(
 class SegmentationEngine(private val context: Context) {
 
     private var segmenter: ImageSegmenter? = null
+    var currentModelType: SegmentationModelType = SegmentationModelType.GROUP_MULTICLASS
+        private set
 
     init {
-        initSegmenter()
+        initSegmenter(currentModelType)
     }
 
-    private fun initSegmenter() {
+    fun setModelType(type: SegmentationModelType) {
+        if (currentModelType != type || segmenter == null) {
+            currentModelType = type
+            initSegmenter(type)
+        }
+    }
+
+    private fun initSegmenter(type: SegmentationModelType) {
+        segmenter?.close()
+        segmenter = null
         try {
-            // Prefer multiclass model for group photos / clothes / hair if available, otherwise selfie_segmenter
-            val modelPath = "models/selfie_multiclass.tflite"
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath(modelPath)
+                .setModelAssetPath(type.assetPath)
                 .build()
 
             val options = ImageSegmenter.ImageSegmenterOptions.builder()
@@ -54,10 +69,13 @@ class SegmentationEngine(private val context: Context) {
                 .build()
 
             segmenter = ImageSegmenter.createFromOptions(context, options)
-        } catch (_: Exception) {
+            AppLogger.i("SegmentationEngine", "Initialized model: ${type.displayName}")
+        } catch (e: Exception) {
+            AppLogger.e("SegmentationEngine", "Failed to init ${type.displayName}: ${e.message}", e)
             try {
+                val fallback = if (type == SegmentationModelType.GROUP_MULTICLASS) SegmentationModelType.SELFIE_FAST else SegmentationModelType.GROUP_MULTICLASS
                 val fallbackOptions = BaseOptions.builder()
-                    .setModelAssetPath("models/selfie_segmenter.tflite")
+                    .setModelAssetPath(fallback.assetPath)
                     .build()
                 val options = ImageSegmenter.ImageSegmenterOptions.builder()
                     .setBaseOptions(fallbackOptions)
@@ -65,8 +83,10 @@ class SegmentationEngine(private val context: Context) {
                     .setOutputConfidenceMasks(true)
                     .build()
                 segmenter = ImageSegmenter.createFromOptions(context, options)
+                currentModelType = fallback
+                AppLogger.i("SegmentationEngine", "Fallback to model: ${fallback.displayName}")
             } catch (e2: Exception) {
-                e2.printStackTrace()
+                AppLogger.e("SegmentationEngine", "Both models failed: ${e2.message}", e2)
                 segmenter = null
             }
         }
@@ -78,21 +98,30 @@ class SegmentationEngine(private val context: Context) {
      */
     fun processImage(
         sourceBmp: Bitmap,
-        threshold: Float = 0.45f,
+        threshold: Float = 0.40f,
         edgeFeathering: Int = 6,
         maskDilation: Int = 0,
-        inpaintRadius: Int = 12
+        inpaintRadius: Int = 16
     ): SegmentationResult {
-        // Guarantee software ARGB_8888 bitmap to avoid MediaPipe hardware buffer crashes
-        val safeBmp = if (sourceBmp.config != Bitmap.Config.ARGB_8888 || sourceBmp.isRecycled) {
-            sourceBmp.copy(Bitmap.Config.ARGB_8888, false)
+        // Downscale massive camera photos (e.g. 12MP/48MP) to max 1440px to prevent OOM and ensure fast processing
+        val maxDim = 1440
+        val srcW = sourceBmp.width
+        val srcH = sourceBmp.height
+        val maxSrc = max(srcW, srcH)
+        val scale = if (maxSrc > maxDim) maxDim.toFloat() / maxSrc.toFloat() else 1.0f
+        val targetW = (srcW * scale).toInt()
+        val targetH = (srcH * scale).toInt()
+
+        val safeBmp = if (scale < 1.0f || sourceBmp.config != Bitmap.Config.ARGB_8888 || sourceBmp.isRecycled) {
+            val scaled = Bitmap.createScaledBitmap(sourceBmp, targetW, targetH, true)
+            scaled.copy(Bitmap.Config.ARGB_8888, false)
         } else {
             sourceBmp
         }
 
         val w = safeBmp.width
         val h = safeBmp.height
-        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h}, config=${safeBmp.config}, threshold=$threshold")
+        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold")
 
         // 1. Run ML inference
         val (rawMask, maskW, maskH) = runInference(safeBmp)
@@ -149,6 +178,15 @@ class SegmentationEngine(private val context: Context) {
             }
         }
         cutoutBmp.setPixels(cutoutPixels, 0, w, 0, 0, w, h)
+        var transparentCount = 0
+        var opaqueCount = 0
+        for (p in cutoutPixels) {
+            val a = (p ushr 24) and 0xFF
+            if (a == 0) transparentCount++
+            else if (a > 200) opaqueCount++
+        }
+        val total = w * h
+        AppLogger.i("SegmentationEngine", "Cutout stats: transparent=${transparentCount * 100 / total}%, opaque=${opaqueCount * 100 / total}%")
 
         // 5. Generate Continuous 3D Depth Map
         val depthBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -206,23 +244,28 @@ class SegmentationEngine(private val context: Context) {
                     if (maskList.size == 2) {
                         // Two masks: index 0 is background, index 1 is person foreground!
                         val byteBuffer = ByteBufferExtractor.extract(maskList[1])
+                        byteBuffer.order(ByteOrder.nativeOrder())
                         byteBuffer.rewind()
                         byteBuffer.asFloatBuffer().get(floatArray)
-                        AppLogger.i("SegmentationEngine", "2-mask inference success: ${mW}x${mH}")
+                        val maxV = floatArray.maxOrNull() ?: 0f
+                        AppLogger.i("SegmentationEngine", "2-mask inference success: ${mW}x${mH}, maxConf=$maxV")
                         return Triple(floatArray, mW, mH)
                     } else if (maskList.size > 2) {
                         // Multiclass: index 0 is background, 1..5 are human classes (hair, skin, clothes)
                         // Foreground probability is 1.0 - P(background)
                         val bgBuffer = ByteBufferExtractor.extract(maskList[0])
+                        bgBuffer.order(ByteOrder.nativeOrder())
                         bgBuffer.rewind()
                         val fb = bgBuffer.asFloatBuffer()
                         for (i in 0 until totalPixels) {
                             floatArray[i] = (1f - fb.get(i)).coerceIn(0f, 1f)
                         }
-                        AppLogger.i("SegmentationEngine", "Multiclass (${maskList.size} classes) inference success: ${mW}x${mH}")
+                        val maxV = floatArray.maxOrNull() ?: 0f
+                        AppLogger.i("SegmentationEngine", "Multiclass (${maskList.size} classes) inference success: ${mW}x${mH}, maxConf=$maxV")
                         return Triple(floatArray, mW, mH)
                     } else {
                         val byteBuffer = ByteBufferExtractor.extract(maskList[0])
+                        byteBuffer.order(ByteOrder.nativeOrder())
                         byteBuffer.rewind()
                         byteBuffer.asFloatBuffer().get(floatArray)
                         AppLogger.i("SegmentationEngine", "Single mask inference success: ${mW}x${mH}")
