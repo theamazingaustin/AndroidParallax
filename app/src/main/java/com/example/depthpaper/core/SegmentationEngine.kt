@@ -15,8 +15,9 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class SegmentationModelType(val assetPath: String, val displayName: String) {
-    GROUP_MULTICLASS("models/selfie_multiclass.tflite", "Group & Multiclass"),
-    SELFIE_FAST("models/selfie_segmenter.tflite", "Selfie Fast")
+    GROUP_MULTICLASS("models/selfie_multiclass.tflite", "People & Groups"),
+    SELFIE_FAST("models/selfie_segmenter.tflite", "Portrait Fast"),
+    UNIVERSAL_SCENERY("models/selfie_multiclass.tflite", "Nature, Structures & Objects")
 }
 
 /**
@@ -35,7 +36,7 @@ data class SegmentationResult(
 
 /**
  * On-Device ML Segmentation and Depth Generation Engine.
- * Operates 100% offline using bundled TFLite models in assets.
+ * Operates 100% offline with GPU/NPU acceleration and CPU fallback.
  */
 class SegmentationEngine(private val context: Context) {
 
@@ -58,8 +59,10 @@ class SegmentationEngine(private val context: Context) {
         segmenter?.close()
         segmenter = null
         try {
+            // First attempt: Hardware acceleration via Adreno GPU / Hexagon NPU
             val baseOptions = BaseOptions.builder()
                 .setModelAssetPath(type.assetPath)
+                .setDelegate(com.google.mediapipe.tasks.core.Delegate.GPU)
                 .build()
 
             val options = ImageSegmenter.ImageSegmenterOptions.builder()
@@ -69,24 +72,23 @@ class SegmentationEngine(private val context: Context) {
                 .build()
 
             segmenter = ImageSegmenter.createFromOptions(context, options)
-            AppLogger.i("SegmentationEngine", "Initialized model: ${type.displayName}")
+            AppLogger.i("SegmentationEngine", "Initialized model on GPU/NPU: ${type.displayName}")
         } catch (e: Exception) {
-            AppLogger.e("SegmentationEngine", "Failed to init ${type.displayName}: ${e.message}", e)
+            AppLogger.w("SegmentationEngine", "GPU delegate init failed (${e.message}), falling back to CPU")
             try {
-                val fallback = if (type == SegmentationModelType.GROUP_MULTICLASS) SegmentationModelType.SELFIE_FAST else SegmentationModelType.GROUP_MULTICLASS
-                val fallbackOptions = BaseOptions.builder()
-                    .setModelAssetPath(fallback.assetPath)
+                val fallbackBaseOptions = BaseOptions.builder()
+                    .setModelAssetPath(type.assetPath)
+                    .setDelegate(com.google.mediapipe.tasks.core.Delegate.CPU)
                     .build()
                 val options = ImageSegmenter.ImageSegmenterOptions.builder()
-                    .setBaseOptions(fallbackOptions)
+                    .setBaseOptions(fallbackBaseOptions)
                     .setRunningMode(RunningMode.IMAGE)
                     .setOutputConfidenceMasks(true)
                     .build()
                 segmenter = ImageSegmenter.createFromOptions(context, options)
-                currentModelType = fallback
-                AppLogger.i("SegmentationEngine", "Fallback to model: ${fallback.displayName}")
+                AppLogger.i("SegmentationEngine", "Initialized model on CPU: ${type.displayName}")
             } catch (e2: Exception) {
-                AppLogger.e("SegmentationEngine", "Both models failed: ${e2.message}", e2)
+                AppLogger.e("SegmentationEngine", "Both GPU and CPU failed: ${e2.message}", e2)
                 segmenter = null
             }
         }
@@ -125,8 +127,12 @@ class SegmentationEngine(private val context: Context) {
         val h = safeBmp.height
         AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold, behindAll=$clockBehindAllSubjects, contrast=$cutoutContrast")
 
-        // 1. Run ML inference
-        val (rawMask, maskW, maskH) = runInference(safeBmp)
+        // 1. Run ML inference or Universal Saliency
+        var (rawMask, maskW, maskH) = if (currentModelType == SegmentationModelType.UNIVERSAL_SCENERY) {
+            computeUniversalSaliencyMask(safeBmp)
+        } else {
+            runInference(safeBmp)
+        }
 
         // Effective threshold with granular mask expansion / contraction
         // If clockBehindAllSubjects is true (Group Mode), scale down threshold so distant/waving people are captured
@@ -144,7 +150,24 @@ class SegmentationEngine(private val context: Context) {
         for (i in 0 until totalPixels) {
             if (rawMask[i] >= effectiveThreshold) fgCount++
         }
-        val fgRatio = fgCount.toFloat() / totalPixels
+        var fgRatio = fgCount.toFloat() / totalPixels
+
+        // If person ML model produced zero or near-zero subject (nature, architecture, object photo),
+        // automatically fallback to Universal Saliency Mask!
+        if (currentModelType != SegmentationModelType.UNIVERSAL_SCENERY && fgRatio < 0.03f) {
+            AppLogger.i("SegmentationEngine", "Low person confidence (fgRatio=$fgRatio). Auto-switching to Universal Saliency for nature/structures.")
+            val universal = computeUniversalSaliencyMask(safeBmp)
+            rawMask = universal.first
+            maskW = universal.second
+            maskH = universal.third
+            fgCount = 0
+            val newTotal = maskW * maskH
+            for (i in 0 until newTotal) {
+                if (rawMask[i] >= effectiveThreshold) fgCount++
+            }
+            fgRatio = fgCount.toFloat() / newTotal
+        }
+
         val isPortrait = fgRatio in 0.05f..0.85f
         AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
@@ -201,7 +224,7 @@ class SegmentationEngine(private val context: Context) {
         val total = w * h
         AppLogger.i("SegmentationEngine", "Cutout stats: transparent=${transparentCount * 100 / total}%, opaque=${opaqueCount * 100 / total}%")
 
-        // 4. Generate Continuous 3D Depth Map with Bilinear Sampling
+        // 4. Generate Continuous 3D Depth Map with Bilinear Sampling & Contrast Flattening
         val depthBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val depthPixels = IntArray(w * h)
         for (y in 0 until h) {
@@ -210,8 +233,14 @@ class SegmentationEngine(private val context: Context) {
             for (x in 0 until w) {
                 val u = x * invW
                 val conf = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
+                // Shape confidence according to Layer Flatness (clampedContrast) and bounds so subject turns pure white
+                val shapedConf = when {
+                    conf <= lowBound -> 0f
+                    conf >= highBound -> 1f
+                    else -> ((conf - lowBound) / denom).coerceIn(0f, 1f)
+                }
                 val bgGradient = (y.toFloat() / h) * 0.35f
-                val depthVal = (conf * 0.85f + bgGradient * (1f - conf)).coerceIn(0f, 1f)
+                val depthVal = (shapedConf * 0.85f + bgGradient * (1f - shapedConf)).coerceIn(0f, 1f)
                 val gray = (depthVal * 255).toInt()
                 depthPixels[rowOffset + x] = Color.rgb(gray, gray, gray)
             }
@@ -316,6 +345,102 @@ class SegmentationEngine(private val context: Context) {
             }
         }
         return Triple(mask, sW, sH)
+    }
+
+    /**
+     * Universal edge and chromatic saliency segmentation for scenery, architecture, and objects.
+     * Operates without needing human pose keypoints, isolating structural and nature foregrounds
+     * from sky, horizons, and distant backgrounds.
+     */
+    fun computeUniversalSaliencyMask(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
+        val mW = min(320, bitmap.width)
+        val mH = min(320, bitmap.height)
+        val scaled = Bitmap.createScaledBitmap(bitmap, mW, mH, true)
+        val pixels = IntArray(mW * mH)
+        scaled.getPixels(pixels, 0, mW, 0, 0, mW, mH)
+        if (scaled != bitmap && !scaled.isRecycled) scaled.recycle()
+
+        // 1. Sample upper sky / horizon baseline (top 15% rows)
+        val skyRows = max(2, (mH * 0.15f).toInt())
+        var skyRSum = 0.0
+        var skyGSum = 0.0
+        var skyBSum = 0.0
+        val skyPixelCount = skyRows * mW
+        for (i in 0 until skyPixelCount) {
+            val c = pixels[i]
+            skyRSum += (c shr 16 and 0xFF) / 255.0
+            skyGSum += (c shr 8 and 0xFF) / 255.0
+            skyBSum += (c and 0xFF) / 255.0
+        }
+        val skyR = (skyRSum / skyPixelCount).toFloat()
+        val skyG = (skyGSum / skyPixelCount).toFloat()
+        val skyB = (skyBSum / skyPixelCount).toFloat()
+        val skyLum = 0.299f * skyR + 0.587f * skyG + 0.114f * skyB
+
+        // 2. Compute grayscale luminance for Sobel edge detection
+        val lum = FloatArray(mW * mH)
+        for (i in 0 until mW * mH) {
+            val c = pixels[i]
+            val r = (c shr 16 and 0xFF) / 255f
+            val g = (c shr 8 and 0xFF) / 255f
+            val b = (c and 0xFF) / 255f
+            lum[i] = 0.299f * r + 0.587f * g + 0.114f * b
+        }
+
+        // 3. Compute Chromatic distance + Sobel gradient + Perspective prior
+        val scores = FloatArray(mW * mH)
+        var minScore = Float.MAX_VALUE
+        var maxScore = Float.MIN_VALUE
+
+        for (y in 1 until mH - 1) {
+            val yNorm = y.toFloat() / mH
+            // Perspective depth prior: closer objects are lower in the camera frustum
+            val perspectiveWeight = 0.30f + 0.70f * (yNorm * yNorm)
+
+            for (x in 1 until mW - 1) {
+                val idx = y * mW + x
+                val c = pixels[idx]
+                val r = (c shr 16 and 0xFF) / 255f
+                val g = (c shr 8 and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val pLum = lum[idx]
+
+                // Color difference from top sky baseline
+                val dR = r - skyR
+                val dG = g - skyG
+                val dB = b - skyB
+                val chromDist = Math.sqrt((dR * dR + dG * dG + dB * dB).toDouble()).toFloat()
+                val lumDist = Math.abs(pLum - skyLum)
+
+                // Sobel edge filter (structural boundaries of buildings, trees, objects)
+                val gx = (lum[(y - 1) * mW + (x + 1)] + 2f * lum[y * mW + (x + 1)] + lum[(y + 1) * mW + (x + 1)]) -
+                         (lum[(y - 1) * mW + (x - 1)] + 2f * lum[y * mW + (x - 1)] + lum[(y + 1) * mW + (x - 1)])
+                val gy = (lum[(y + 1) * mW + (x - 1)] + 2f * lum[(y + 1) * mW + x] + lum[(y + 1) * mW + (x + 1)]) -
+                         (lum[(y - 1) * mW + (x - 1)] + 2f * lum[(y - 1) * mW + x] + lum[(y - 1) * mW + (x + 1)])
+                val edgeMag = Math.sqrt((gx * gx + gy * gy).toDouble()).toFloat()
+
+                val rawScore = (chromDist * 0.45f + lumDist * 0.25f + edgeMag * 0.30f) * perspectiveWeight
+                scores[idx] = rawScore
+                if (rawScore < minScore) minScore = rawScore
+                if (rawScore > maxScore) maxScore = rawScore
+            }
+        }
+
+        // 4. Normalize to [0f, 1f] with high-contrast sigmoid thresholding
+        val mask = FloatArray(mW * mH)
+        val range = max(0.001f, maxScore - minScore)
+        for (i in 0 until mW * mH) {
+            val norm = ((scores[i] - minScore) / range).coerceIn(0f, 1f)
+            // Sharpen the subject curve so sky falls to 0 while foreground subjects rise to 1
+            mask[i] = if (norm > 0.40f) {
+                (0.5f + (norm - 0.40f) * 1.5f).coerceIn(0f, 1f)
+            } else {
+                (norm * 0.8f).coerceIn(0f, 1f)
+            }
+        }
+
+        AppLogger.i("SegmentationEngine", "Universal saliency mask computed: ${mW}x${mH}, range=$minScore..$maxScore")
+        return Triple(mask, mW, mH)
     }
 
     fun close() {

@@ -41,7 +41,7 @@ class ParallaxWallpaperService : WallpaperService() {
         private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as? SensorManager }
         private val keyguardManager by lazy { getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager }
 
-        private val sensorFilter = SensorFilter()
+        private val sensorFilter = SensorFilter(adaptiveBaseline = true)
         private val handler = Handler(Looper.getMainLooper())
 
         private var activeProject: WallpaperProject? = null
@@ -234,16 +234,16 @@ class ParallaxWallpaperService : WallpaperService() {
             val shiftY = tiltY
 
             // Positive differential parallax:
-            // Background is furthest away (0.15x)
-            // Clock is midground (0.35x)
-            // Cutout subject is nearest (0.55x)
+            // Background is furthest away (-0.15x)
+            // Clock is midground (+0.30x)
+            // Cutout subject is nearest (+0.70x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && fgBitmap != null
-            val bgShiftX = shiftX * 0.35f
-            val bgShiftY = shiftY * 0.35f
-            val fgShiftX = shiftX * 0.35f
-            val fgShiftY = shiftY * 0.35f
-            val clockShiftX = shiftX * 0.15f
-            val clockShiftY = shiftY * 0.15f
+            val bgShiftX = if (isLayeredMode) shiftX * -0.15f else shiftX * 0.20f
+            val bgShiftY = if (isLayeredMode) shiftY * -0.15f else shiftY * 0.20f
+            val clockShiftX = shiftX * 0.30f
+            val clockShiftY = shiftY * 0.30f
+            val fgShiftX = shiftX * 0.70f
+            val fgShiftY = shiftY * 0.70f
 
             val bgDest = RectF(
                 baseLeft + bgShiftX,

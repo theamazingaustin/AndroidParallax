@@ -35,4 +35,17 @@ class CoreEnginesTest {
         assertEquals(0.75f, step2X, 0.01f)
         assertEquals(-0.75f, step2Y, 0.01f)
     }
+
+    @Test
+    fun testAdaptiveBaselineCentersAtInitialHoldingAngle() {
+        val filter = SensorFilter(smoothingFactor = 1.0f, maxAngleDegrees = 15f, adaptiveBaseline = true)
+        // First step sets the baseline to (10f, -45f) -> delta is 0
+        val (initX, initY) = filter.update(rawRoll = 10f, rawPitch = -45f)
+        assertEquals(0f, initX, 0.01f)
+        assertEquals(0f, initY, 0.01f)
+
+        // Tilting 15 degrees right (from 10f to 25f)
+        val (tiltX, _) = filter.update(rawRoll = 25f, rawPitch = -45f)
+        assertTrue(tiltX > 0.8f)
+    }
 }

@@ -633,12 +633,17 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 FilterChip(
                     selected = selectedModel == SegmentationModelType.GROUP_MULTICLASS,
                     onClick = { selectedModel = SegmentationModelType.GROUP_MULTICLASS },
-                    label = { Text("Group / Multi-Subject", fontSize = 11.sp) }
+                    label = { Text("Group / People", fontSize = 11.sp) }
                 )
                 FilterChip(
                     selected = selectedModel == SegmentationModelType.SELFIE_FAST,
                     onClick = { selectedModel = SegmentationModelType.SELFIE_FAST },
-                    label = { Text("Selfie Portrait", fontSize = 11.sp) }
+                    label = { Text("Selfie", fontSize = 11.sp) }
+                )
+                FilterChip(
+                    selected = selectedModel == SegmentationModelType.UNIVERSAL_SCENERY,
+                    onClick = { selectedModel = SegmentationModelType.UNIVERSAL_SCENERY },
+                    label = { Text("Nature / Objects", fontSize = 11.sp) }
                 )
             }
 
@@ -655,10 +660,13 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (selectedModel == SegmentationModelType.GROUP_MULTICLASS) {
-                            "Group & Multi-Subject Engine: Detects multiple people, full-body poses, and objects. Best for family and group photos."
-                        } else {
-                            "Selfie Portrait Engine: Ultra-fast neural model tuned for single or close-up portraits, with hair-strand precision."
+                        text = when (selectedModel) {
+                            SegmentationModelType.GROUP_MULTICLASS ->
+                                "Group & Multi-Subject Engine: Detects multiple people, full-body poses, and family portraits."
+                            SegmentationModelType.SELFIE_FAST ->
+                                "Selfie Portrait Engine: Ultra-fast neural model tuned for single or close-up portraits."
+                            SegmentationModelType.UNIVERSAL_SCENERY ->
+                                "Universal Nature & Structures: Segments trees, architecture, monuments, pets, and objects."
                         },
                         fontSize = 11.sp,
                         color = Color.LightGray

@@ -64,7 +64,7 @@ fun ParallaxViewport(
     val context = LocalContext.current
     var sensorTiltX by remember { mutableFloatStateOf(0f) }
     var sensorTiltY by remember { mutableFloatStateOf(0f) }
-    val sensorFilter = remember { SensorFilter() }
+    val sensorFilter = remember { SensorFilter(adaptiveBaseline = true) }
 
     var isDraggingClock by remember { mutableStateOf(false) }
     var currentClockX by remember(project.id) { mutableFloatStateOf(project.lockScreenConfig.horizontalOffsetPercent) }
@@ -92,6 +92,10 @@ fun ParallaxViewport(
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent?) {
                 if (event == null) return
+                val cfg = currentMotionConfig
+                sensorFilter.smoothingFactor = cfg.sensorSmoothing
+                sensorFilter.maxAngleDegrees = cfg.maxTiltAngle
+
                 if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
                     val rotMatrix = FloatArray(9)
                     SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
@@ -101,14 +105,18 @@ fun ParallaxViewport(
                     val pitchDeg = Math.toDegrees(orientation[1].toDouble()).toFloat()
                     val rollDeg = Math.toDegrees(orientation[2].toDouble()).toFloat()
 
-                    val cfg = currentMotionConfig
-                    sensorFilter.smoothingFactor = cfg.sensorSmoothing
-                    sensorFilter.maxAngleDegrees = cfg.maxTiltAngle
-
                     val (nx, ny) = sensorFilter.update(rollDeg, pitchDeg)
                     val signX = if (cfg.invertX) -1f else 1f
                     val signY = if (cfg.invertY) -1f else 1f
 
+                    sensorTiltX = nx * signX
+                    sensorTiltY = ny * signY
+                } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                    val ax = event.values[0]
+                    val ay = event.values[1]
+                    val (nx, ny) = sensorFilter.update(ax * 3f, ay * 3f)
+                    val signX = if (cfg.invertX) -1f else 1f
+                    val signY = if (cfg.invertY) -1f else 1f
                     sensorTiltX = nx * signX
                     sensorTiltY = ny * signY
                 }
@@ -281,8 +289,8 @@ fun ParallaxViewport(
             }
 
             // --- Normal & Parallax Rendering ---
-            val intensity = project.motionConfig.parallaxIntensity
-            val maxShift = canvasW * 0.04f * intensity
+            val intensity = project.motionConfig.parallaxIntensity.coerceAtLeast(0.3f)
+            val maxShift = canvasW * 0.08f * intensity
             val shiftX = totalTiltX * maxShift
             val shiftY = totalTiltY * maxShift
 
@@ -302,18 +310,16 @@ fun ParallaxViewport(
             val drawSize = IntSize(drawW, drawH)
 
             // Positive differential parallax:
-            // Background is furthest away (0.15x)
-            // Clock is midground (0.35x)
-            // Cutout subject is nearest (0.55x)
+            // Background is furthest away (-0.15x)
+            // Clock is midground (+0.30x)
+            // Cutout subject is nearest (+0.70x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
-            // Apple-style depth parallax: photo and subject tilt in unified camera perspective (0.35x),
-            // while the clock glides at virtual midground depth (0.15x) behind the subject.
-            val bgShiftX = shiftX * 0.35f
-            val bgShiftY = shiftY * 0.35f
-            val fgShiftX = shiftX * 0.35f
-            val fgShiftY = shiftY * 0.35f
-            val clockShiftX = shiftX * 0.15f
-            val clockShiftY = shiftY * 0.15f
+            val bgShiftX = if (isLayeredMode) shiftX * -0.15f else shiftX * 0.20f
+            val bgShiftY = if (isLayeredMode) shiftY * -0.15f else shiftY * 0.20f
+            val clockParallaxShiftX = shiftX * 0.30f
+            val clockParallaxShiftY = shiftY * 0.30f
+            val fgShiftX = shiftX * 0.70f
+            val fgShiftY = shiftY * 0.70f
 
             val bgLeft = baseLeft + bgShiftX.roundToInt()
             val bgTop = baseTop + bgShiftY.roundToInt()
@@ -343,12 +349,8 @@ fun ParallaxViewport(
             val drawClock = {
                 if (showClock) {
                     val cfg = project.lockScreenConfig
-                    // Clock shifts slightly at midground depth relative to the photo
-                    val clockShiftX = shiftX * 0.35f
-                    val clockShiftY = shiftY * 0.35f
-
-                    val clockX = canvasW * currentClockX + clockShiftX
-                    val clockY = canvasH * currentClockY + clockShiftY
+                    val clockX = canvasW * currentClockX + clockParallaxShiftX
+                    val clockY = canvasH * currentClockY + clockParallaxShiftY
 
                     drawIntoCanvas { nativeCanvas ->
                         val datePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
