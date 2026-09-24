@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
                                 onToggleFavorite = { id -> viewModel.toggleFavorite(id) },
                                 onDuplicate = { id -> viewModel.duplicateProject(id) },
                                 onDelete = { id -> viewModel.deleteProject(id) },
+                                onDeleteMultiple = { ids -> viewModel.deleteProjects(ids) },
                                 onNewProjectClick = { galleryPhotoLauncher.launch("image/*") }
                             )
                         }

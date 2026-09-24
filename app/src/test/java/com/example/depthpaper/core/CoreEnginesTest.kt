@@ -111,4 +111,20 @@ class CoreEnginesTest {
         assertEquals(AiPipelineChoice.MULTI_SCALE_ZOOM, AiPipelineChoice.fromId("MULTI_SCALE_TILING"))
         assertEquals(AiPipelineChoice.DEPTH_MATTING_FUSION, AiPipelineChoice.fromId("DEPTH_MATTING_FUSION"))
     }
+
+    @Test
+    fun testInpaintFillSliderRangesTightened() {
+        for (model in AiModelChoice.entries) {
+            val prof = model.tuningProfile
+            assertTrue("inpaintFill min should be 2f", prof.inpaintFill.min == 2f)
+            assertTrue("inpaintFill max should be 20f", prof.inpaintFill.max == 20f)
+            assertTrue("inpaintFill default should be <= 8f", prof.inpaintFill.default in 6f..8f)
+        }
+        for (pipe in AiPipelineChoice.entries) {
+            val prof = pipe.tuningProfile
+            assertTrue("inpaintFill min should be 2f", prof.inpaintFill.min == 2f)
+            assertTrue("inpaintFill max should be 20f", prof.inpaintFill.max == 20f)
+            assertTrue("inpaintFill default should be <= 8f", prof.inpaintFill.default in 6f..8f)
+        }
+    }
 }

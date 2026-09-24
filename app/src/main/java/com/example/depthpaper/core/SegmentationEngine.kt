@@ -67,7 +67,7 @@ enum class AiModelChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
             layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
             edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 20f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     ),
     SELFIE_MULTICLASS(
@@ -82,7 +82,7 @@ enum class AiModelChoice(
             maskMargin = SliderSetting(min = -8f, max = 8f, default = 0f, steps = 16),
             layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
             edgeSoftness = SliderSetting(min = 2f, max = 16f, default = 8f, steps = 14),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 6f, steps = 18)
         )
     ),
     DEEPLAB_V3(
@@ -97,7 +97,7 @@ enum class AiModelChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
             layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.95f),
             edgeSoftness = SliderSetting(min = 1f, max = 12f, default = 4f, steps = 11),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 22f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     ),
     FAST_SELFIE(
@@ -112,7 +112,7 @@ enum class AiModelChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
             layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.90f),
             edgeSoftness = SliderSetting(min = 1f, max = 14f, default = 5f, steps = 13),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 6f, steps = 18)
         )
     );
 
@@ -150,7 +150,7 @@ enum class AiPipelineChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
             layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.92f),
             edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 5f, steps = 15),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 24f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     ),
     SEMANTIC_PORTRAIT_HYBRID(
@@ -164,7 +164,7 @@ enum class AiPipelineChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
             layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.92f),
             edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 5f, steps = 15),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 24f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     ),
     MULTI_SCALE_ZOOM(
@@ -178,7 +178,7 @@ enum class AiPipelineChoice(
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
             layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.90f),
             edgeSoftness = SliderSetting(min = 1f, max = 14f, default = 4f, steps = 13),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 22f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     ),
     PURE_DEPTH_3D(
@@ -192,7 +192,7 @@ enum class AiPipelineChoice(
             maskMargin = SliderSetting(min = -5f, max = 5f, default = 0f, steps = 10),
             layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.80f),
             edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
         )
     );
 
@@ -603,14 +603,14 @@ class SegmentationEngine(private val context: Context) {
             fallbackBmp
         }
 
-        // 7. Inpainted Background Plate (Large dilation ensures subjects are 100% erased under the cutout)
+        // 7. Inpainted Background Plate (Tight dilation preserves pristine background textures)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = adjustedMask,
             maskWidth = maskW,
             maskHeight = maskH,
             threshold = threshold,
-            dilationRadius = inpaintRadius.coerceIn(4, 48)
+            dilationRadius = inpaintRadius.coerceIn(2, 16)
         )
 
         return SegmentationResult(

@@ -470,4 +470,24 @@ class StudioViewModel(
             selectProject(remaining)
         }
     }
+
+    fun deleteProjects(projectIds: Set<String>) {
+        projectIds.forEach { repository.deleteProject(it) }
+        refreshProjectsList()
+        val currentId = _uiState.value.currentProject.id
+        if (currentId in projectIds) {
+            val remaining = repository.getActiveProject() ?: repository.getAllProjects().firstOrNull()
+            if (remaining != null) {
+                selectProject(remaining)
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    currentProject = WallpaperProject(),
+                    sourceBitmap = null,
+                    cutoutBitmap = null,
+                    backgroundBitmap = null,
+                    depthBitmap = null
+                )
+            }
+        }
+    }
 }

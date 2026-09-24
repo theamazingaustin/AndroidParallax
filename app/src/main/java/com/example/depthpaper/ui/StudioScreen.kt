@@ -41,7 +41,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Refresh
@@ -207,16 +206,6 @@ fun StudioScreen(
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { AppLogger.copyLogsToClipboard(context) }) {
-                        Icon(
-                            Icons.Default.BugReport,
-                            contentDescription = "Copy Diagnostic Logs",
-                            tint = Color(0xFF00E5FF)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
                     Button(
                         onClick = { viewModel.setActiveWallpaper(state.currentProject.id, context) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
