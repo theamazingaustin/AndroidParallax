@@ -119,7 +119,7 @@ fun ParallaxViewport(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
+            .pointerInput(project.id) {
                 detectDragGestures(
                     onDragStart = { offset ->
                         val cfg = project.lockScreenConfig

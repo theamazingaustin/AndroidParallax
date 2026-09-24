@@ -135,7 +135,8 @@ data class WallpaperProject(
     val thumbnailPath: String = "",
     val threshold: Float = 0.5f,
     val edgeFeathering: Int = 6,
-    val inpaintRadius: Int = 14,
+    val maskExpansion: Int = 0,
+    val inpaintRadius: Int = 8,
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
@@ -155,6 +156,7 @@ data class WallpaperProject(
         put("thumbnailPath", thumbnailPath)
         put("threshold", threshold.toDouble())
         put("edgeFeathering", edgeFeathering)
+        put("maskExpansion", maskExpansion)
         put("inpaintRadius", inpaintRadius)
         put("motionConfig", motionConfig.toJson())
         put("lockScreenConfig", lockScreenConfig.toJson())
@@ -177,7 +179,8 @@ data class WallpaperProject(
             thumbnailPath = json.optString("thumbnailPath", ""),
             threshold = json.optDouble("threshold", 0.5).toFloat(),
             edgeFeathering = json.optInt("edgeFeathering", 6),
-            inpaintRadius = json.optInt("inpaintRadius", 14),
+            maskExpansion = json.optInt("maskExpansion", 0),
+            inpaintRadius = json.optInt("inpaintRadius", 8),
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),

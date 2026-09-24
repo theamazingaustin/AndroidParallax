@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -74,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -109,7 +111,7 @@ fun StudioScreen(
                 @Suppress("DEPRECATION")
                 MediaStore.Images.Media.getBitmap(context.contentResolver, it)
             }
-            viewModel.importNewImage(bitmap, "My Photo")
+            viewModel.changeProjectImage(bitmap)
         }
     }
 
@@ -187,75 +189,92 @@ fun StudioScreen(
                 }
             }
 
-            // Viewport Interactive Preview (3D Parallax & Drag)
+            // Phone-proportioned Interactive Preview (scaled down slightly to match user device)
+            val configuration = LocalConfiguration.current
+            val phoneAspectRatio = (configuration.screenWidthDp.toFloat() / configuration.screenHeightDp.toFloat()).coerceIn(0.42f, 0.65f)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 10.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.Black)
+                    .weight(1.0f)
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center
             ) {
-                ParallaxViewport(
-                    project = state.currentProject,
-                    previewSurface = state.previewSurface,
-                    sourceBmp = state.sourceBitmap,
-                    cutoutBmp = state.cutoutBitmap,
-                    backgroundBmp = state.backgroundBitmap,
-                    depthBmp = state.depthBitmap,
-                    simulatedTiltX = state.simulatedTiltX,
-                    simulatedTiltY = state.simulatedTiltY,
-                    onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
-                    onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
-                    modifier = Modifier.fillMaxSize()
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
+                        .clip(RoundedCornerShape(26.dp))
+                        .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
+                        .background(Color.Black)
+                ) {
+                    ParallaxViewport(
+                        project = state.currentProject,
+                        previewSurface = state.previewSurface,
+                        sourceBmp = state.sourceBitmap,
+                        cutoutBmp = state.cutoutBitmap,
+                        backgroundBmp = state.backgroundBitmap,
+                        depthBmp = state.depthBitmap,
+                        simulatedTiltX = state.simulatedTiltX,
+                        simulatedTiltY = state.simulatedTiltY,
+                        onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
+                        onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-                // Processing overlay
-                if (state.isProcessing) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.65f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = state.statusMessage ?: "AI processing on-device...",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                    // Processing overlay
+                    if (state.isProcessing) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = state.statusMessage ?: "AI processing on-device...",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
-                }
 
-                // Drag hint pill at bottom of viewport
-                Surface(
-                    color = Color.Black.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 12.dp)
-                ) {
-                    Text(
-                        text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
+                    // Drag hint pill at bottom of viewport
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Text(
+                            text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Combined Bottom Control Panel
-            StudioBottomControlPanel(
-                viewModel = viewModel,
-                state = state,
-                onPickPhoto = { photoPickerLauncher.launch("image/*") }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1.05f)
+            ) {
+                StudioBottomControlPanel(
+                    viewModel = viewModel,
+                    state = state,
+                    onPickPhoto = { photoPickerLauncher.launch("image/*") }
+                )
+            }
         }
     }
 }
@@ -275,11 +294,11 @@ fun StudioBottomControlPanel(
     val tabs = listOf("Clock & Wallpaper", "Layers & 3D Motion")
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxSize(),
         color = Color(0xFF141422),
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
@@ -507,6 +526,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     val m = project.motionConfig
     var threshold by remember(project.id, project.threshold) { mutableFloatStateOf(project.threshold) }
     var feathering by remember(project.id, project.edgeFeathering) { mutableIntStateOf(project.edgeFeathering) }
+    var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
     var selectedModel by remember { mutableStateOf(viewModel.getCurrentModelType()) }
 
@@ -632,6 +652,31 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 )
             }
 
+            // Mask Expansion / Contraction (Choke)
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Mask Margin", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
+                    Slider(
+                        value = maskExpansion.toFloat(),
+                        onValueChange = { maskExpansion = it.toInt() },
+                        valueRange = -10f..10f,
+                        steps = 20,
+                        modifier = Modifier.weight(1f)
+                    )
+                    val label = when {
+                        maskExpansion > 0 -> "+${maskExpansion}px"
+                        maskExpansion < 0 -> "${maskExpansion}px"
+                        else -> "0px"
+                    }
+                    Text(label, fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(42.dp))
+                }
+                Text(
+                    text = "Expands (+) or contracts/chokes (-) subject cutout borders to eliminate background halos or capture extra hair.",
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+            }
+
             // Edge Softness / Feathering
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -659,14 +704,14 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     Slider(
                         value = inpaintRadius.toFloat(),
                         onValueChange = { inpaintRadius = it.toInt() },
-                        valueRange = 8f..40f,
-                        steps = 32,
+                        valueRange = 2f..16f,
+                        steps = 14,
                         modifier = Modifier.weight(1f)
                     )
                     Text("${inpaintRadius}px", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
                 }
                 Text(
-                    text = "Expansion radius to completely erase subjects from the background plate using multi-scale pyramid synthesis, eliminating duplicate reflections.",
+                    text = "Dilation margin to erase subjects underneath and reconstruct background using multi-scale pyramid synthesis with bilinear upsampling.",
                     fontSize = 10.sp,
                     color = Color.Gray
                 )
@@ -698,6 +743,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 viewModel.reprocessWithTuning(
                     threshold = threshold,
                     feathering = feathering,
+                    maskExpansion = maskExpansion,
                     inpaintRadius = inpaintRadius,
                     modelType = selectedModel
                 )

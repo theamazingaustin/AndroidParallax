@@ -80,6 +80,7 @@ import com.example.depthpaper.core.AppLogger
 import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import com.example.depthpaper.core.AppUpdater
+import com.example.depthpaper.core.UpdateCheckResult
 import com.example.depthpaper.core.UpdateInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,9 +114,9 @@ fun ProjectGalleryScreen(
 
     // Automatic update check upon launch
     LaunchedEffect(Unit) {
-        val latest = AppUpdater.checkForUpdate()
-        if (latest != null) {
-            updateInfo = latest
+        when (val result = AppUpdater.checkForUpdate()) {
+            is UpdateCheckResult.UpdateAvailable -> updateInfo = result.updateInfo
+            else -> Unit
         }
     }
 
@@ -255,10 +256,26 @@ fun ProjectGalleryScreen(
                                     if (!isCheckingUpdate) {
                                         isCheckingUpdate = true
                                         coroutineScope.launch {
-                                            val latest = AppUpdater.checkForUpdate()
+                                            val result = AppUpdater.checkForUpdate()
                                             isCheckingUpdate = false
-                                            if (latest != null) {
-                                                updateInfo = latest
+                                            when (result) {
+                                                is UpdateCheckResult.UpdateAvailable -> {
+                                                    updateInfo = result.updateInfo
+                                                }
+                                                is UpdateCheckResult.UpToDate -> {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "DepthPaper is up to date (v${BuildConfig.VERSION_NAME})",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                                is UpdateCheckResult.Error -> {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "Check failed: ${result.message}",
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
                                             }
                                         }
                                     }

@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import com.example.depthpaper.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -24,18 +25,24 @@ data class UpdateInfo(
     val releaseNotes: String
 )
 
+sealed class UpdateCheckResult {
+    data class UpdateAvailable(val updateInfo: UpdateInfo) : UpdateCheckResult()
+    data class UpToDate(val currentVersion: String) : UpdateCheckResult()
+    data class Error(val message: String) : UpdateCheckResult()
+}
+
 object AppUpdater {
 
     private const val GITHUB_REPO = "theamazingaustin/AndroidParallax"
-    private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    private const val RELEASES_URL = "https://api.github.com/repos/$GITHUB_REPO/releases"
 
     /**
      * Checks GitHub API for newer release than current BuildConfig.VERSION_NAME
      */
-    suspend fun checkForUpdate(currentVersion: String = BuildConfig.VERSION_NAME): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun checkForUpdate(currentVersion: String = BuildConfig.VERSION_NAME): UpdateCheckResult = withContext(Dispatchers.IO) {
         try {
             AppLogger.i("AppUpdater", "Checking GitHub API for updates. Current version: $currentVersion")
-            val url = URL(LATEST_RELEASE_URL)
+            val url = URL(RELEASES_URL)
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000
                 readTimeout = 8000
@@ -45,55 +52,71 @@ object AppUpdater {
 
             if (conn.responseCode != 200) {
                 AppLogger.w("AppUpdater", "GitHub API returned HTTP ${conn.responseCode}")
-                return@withContext null
+                return@withContext UpdateCheckResult.Error("HTTP ${conn.responseCode}")
             }
 
             val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
-            val json = JSONObject(jsonStr)
+            val releasesArray = JSONArray(jsonStr)
 
-            val tagName = json.optString("tag_name", "").trim()
-            val releaseNotes = json.optString("body", "")
-            val cleanRemoteVersion = tagName.removePrefix("v").trim()
-            val cleanCurrentVersion = currentVersion.removePrefix("v").trim()
-
-            val newer = isVersionNewer(cleanRemoteVersion, cleanCurrentVersion)
-            AppLogger.i("AppUpdater", "Remote tag: $tagName ($cleanRemoteVersion), isNewer: $newer")
-            if (!newer) {
-                return@withContext null
+            if (releasesArray.length() == 0) {
+                return@withContext UpdateCheckResult.UpToDate(currentVersion)
             }
 
-            // Find APK asset
-            val assets = json.optJSONArray("assets") ?: return@withContext null
+            var latestValidRelease: JSONObject? = null
             var apkUrl: String? = null
             var apkName: String? = null
             var apkSize: Long = 0L
 
-            for (i in 0 until assets.length()) {
-                val asset = assets.getJSONObject(i)
-                val name = asset.optString("name", "")
-                if (name.endsWith(".apk", ignoreCase = true)) {
-                    apkUrl = asset.optString("browser_download_url", "")
-                    apkName = name
-                    apkSize = asset.optLong("size", 0L)
-                    break
+            for (i in 0 until releasesArray.length()) {
+                val rel = releasesArray.getJSONObject(i)
+                if (rel.optBoolean("draft", false)) continue
+                val tag = rel.optString("tag_name", "").trim()
+                if (!tag.startsWith("v")) continue
+
+                val assets = rel.optJSONArray("assets") ?: continue
+                for (j in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(j)
+                    val name = asset.optString("name", "")
+                    if (name.endsWith(".apk", ignoreCase = true)) {
+                        apkUrl = asset.optString("browser_download_url", "")
+                        apkName = name
+                        apkSize = asset.optLong("size", 0L)
+                        latestValidRelease = rel
+                        break
+                    }
                 }
+                if (latestValidRelease != null) break
             }
 
-            if (apkUrl.isNullOrEmpty() || apkName.isNullOrEmpty()) {
-                return@withContext null
+            if (latestValidRelease == null || apkUrl.isNullOrEmpty() || apkName.isNullOrEmpty()) {
+                return@withContext UpdateCheckResult.UpToDate(currentVersion)
             }
 
-            UpdateInfo(
-                versionName = cleanRemoteVersion,
-                versionTag = tagName,
-                downloadUrl = apkUrl,
-                apkName = apkName,
-                apkSizeBytes = apkSize,
-                releaseNotes = releaseNotes
-            )
+            val tagName = latestValidRelease.optString("tag_name", "").trim()
+            val releaseNotes = latestValidRelease.optString("body", "")
+            val cleanRemoteVersion = tagName.removePrefix("v").trim()
+            val cleanCurrentVersion = currentVersion.removePrefix("v").trim()
+
+            val newer = isVersionNewer(cleanRemoteVersion, cleanCurrentVersion)
+            AppLogger.i("AppUpdater", "Remote tag: $tagName ($cleanRemoteVersion), current: $cleanCurrentVersion, isNewer: $newer")
+
+            if (newer) {
+                UpdateCheckResult.UpdateAvailable(
+                    UpdateInfo(
+                        versionName = cleanRemoteVersion,
+                        versionTag = tagName,
+                        downloadUrl = apkUrl,
+                        apkName = apkName,
+                        apkSizeBytes = apkSize,
+                        releaseNotes = releaseNotes
+                    )
+                )
+            } else {
+                UpdateCheckResult.UpToDate(currentVersion)
+            }
         } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            AppLogger.e("AppUpdater", "Error checking for update: ${e.message}", e)
+            UpdateCheckResult.Error(e.localizedMessage ?: "Network error")
         }
     }
 

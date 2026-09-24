@@ -105,7 +105,8 @@ class StudioViewModel(
                 sourceBmp = bitmap,
                 threshold = 0.5f,
                 edgeFeathering = 6,
-                inpaintRadius = 14
+                maskExpansion = 0,
+                inpaintRadius = 8
             )
 
             // Auto-detect mode: Portrait -> LAYERED_2D, Scenic/Other -> SPATIAL_3D
@@ -142,6 +143,56 @@ class StudioViewModel(
                     depthBitmap = result.depthMap,
                     isProcessing = false,
                     statusMessage = if (result.isPortraitDetected) "Detected Portrait → Layered Cutout" else "Detected Scene → 3D Spatial Depth"
+                )
+                refreshProjectsList()
+            }
+        }
+    }
+
+    /**
+     * Changes photo in existing project without creating a new project ID or resetting customized clock/motion configs.
+     */
+    fun changeProjectImage(bitmap: Bitmap) {
+        val cur = _uiState.value.currentProject
+        _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "AI updating wallpaper photo...")
+        viewModelScope.launch(Dispatchers.Default) {
+            val result = segmentationEngine.processImage(
+                sourceBmp = bitmap,
+                threshold = cur.threshold,
+                edgeFeathering = cur.edgeFeathering,
+                maskExpansion = cur.maskExpansion,
+                inpaintRadius = cur.inpaintRadius
+            )
+
+            val detectedMode = if (result.isPortraitDetected) RenderMode.LAYERED_2D else RenderMode.SPATIAL_3D
+
+            val thumbScale = 480f / maxOf(bitmap.width, bitmap.height)
+            val thumbW = if (thumbScale < 1f) (bitmap.width * thumbScale).toInt() else bitmap.width
+            val thumbH = if (thumbScale < 1f) (bitmap.height * thumbScale).toInt() else bitmap.height
+            val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
+
+            val updated = cur.copy(
+                renderMode = detectedMode
+            )
+
+            val saved = repository.saveProject(
+                project = updated,
+                sourceBmp = bitmap,
+                cutoutBmp = result.foregroundCutout,
+                inpaintedBgBmp = result.inpaintedBackground,
+                depthBmp = result.depthMap,
+                thumbBmp = thumbBmp
+            )
+
+            withContext(Dispatchers.Main) {
+                _uiState.value = _uiState.value.copy(
+                    currentProject = saved,
+                    sourceBitmap = bitmap,
+                    cutoutBitmap = result.foregroundCutout,
+                    backgroundBitmap = result.inpaintedBackground,
+                    depthBitmap = result.depthMap,
+                    isProcessing = false,
+                    statusMessage = null
                 )
                 refreshProjectsList()
             }
@@ -240,6 +291,7 @@ class StudioViewModel(
     fun reprocessWithTuning(
         threshold: Float = _uiState.value.currentProject.threshold,
         feathering: Int = _uiState.value.currentProject.edgeFeathering,
+        maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
         inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
         modelType: SegmentationModelType? = null
     ) {
@@ -252,12 +304,14 @@ class StudioViewModel(
                 sourceBmp = src,
                 threshold = threshold,
                 edgeFeathering = feathering,
+                maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius
             )
 
             val cur = _uiState.value.currentProject.copy(
                 threshold = threshold,
                 edgeFeathering = feathering,
+                maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius
             )
 
