@@ -264,6 +264,9 @@ fun StudioScreen(
                     simulatedTiltY = state.simulatedTiltY,
                     onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
                     onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
+                    onImageTransformChanged = { scale, panX, panY ->
+                        viewModel.updateImageTransform(scale, panX, panY)
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -561,6 +564,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var feathering by remember(project.id, project.edgeFeathering) { mutableIntStateOf(project.edgeFeathering) }
     var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
+    var clockBehindAllSubjects by remember(project.id, project.clockBehindAllSubjects) { mutableStateOf(project.clockBehindAllSubjects) }
+    var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
     var selectedModel by remember { mutableStateOf(viewModel.getCurrentModelType()) }
 
     Column(
@@ -662,6 +667,32 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
+        // 3. Clock Z-Depth / Subject Layering Control
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Clock Z-Depth Layering", fontSize = 12.sp, color = Color.Gray)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = clockBehindAllSubjects,
+                    onClick = { clockBehindAllSubjects = true },
+                    label = { Text("Behind All (Group)", fontSize = 11.sp) }
+                )
+                FilterChip(
+                    selected = !clockBehindAllSubjects,
+                    onClick = { clockBehindAllSubjects = false },
+                    label = { Text("Between Subjects", fontSize = 11.sp) }
+                )
+            }
+            Text(
+                text = if (clockBehindAllSubjects) {
+                    "Behind All: Pushes the clock behind every person in the photo (including distant and waving group members). Best for group photos."
+                } else {
+                    "Between Subjects: Weaves the clock between foreground and background subjects for depth layering."
+                },
+                fontSize = 11.sp,
+                color = Color.LightGray
+            )
+        }
+
         // 3. Granular AI Tuning Controls (with detailed descriptions)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Granular AI Tuning", fontSize = 12.sp, color = Color.Gray)
@@ -705,6 +736,25 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 }
                 Text(
                     text = "Expands (+) or contracts/chokes (-) subject cutout borders to eliminate background halos or capture extra hair.",
+                    fontSize = 10.sp,
+                    color = Color.Gray
+                )
+            }
+
+            // Layer Flatness / Contrast (eliminates translucency and ghost fuzziness)
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Layer Flatness", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
+                    Slider(
+                        value = cutoutContrast,
+                        onValueChange = { cutoutContrast = it },
+                        valueRange = 0.50f..1.0f,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("${(cutoutContrast * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
+                }
+                Text(
+                    text = "Increases layer opacity contrast to 100% solid. Flattens subjects to completely eliminate semi-transparent fuzziness and ghost text bleed.",
                     fontSize = 10.sp,
                     color = Color.Gray
                 )
@@ -778,7 +828,9 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     feathering = feathering,
                     maskExpansion = maskExpansion,
                     inpaintRadius = inpaintRadius,
-                    modelType = selectedModel
+                    modelType = selectedModel,
+                    clockBehindAllSubjects = clockBehindAllSubjects,
+                    cutoutContrast = cutoutContrast
                 )
             },
             enabled = !state.isProcessing && state.sourceBitmap != null,

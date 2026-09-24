@@ -222,11 +222,13 @@ class ParallaxWallpaperService : WallpaperService() {
             val imgH = refBmp?.height?.toFloat() ?: 2400f
 
             val overscan = 1.08f
-            val scale = max((w * overscan) / imgW, (h * overscan) / imgH)
+            val scale = max((w * overscan) / imgW, (h * overscan) / imgH) * project.imageScale
             val drawW = imgW * scale
             val drawH = imgH * scale
-            val baseLeft = (w - drawW) / 2f
-            val baseTop = (h - drawH) / 2f
+            val panOffsetX = w * project.imagePanX
+            val panOffsetY = h * project.imagePanY
+            val baseLeft = (w - drawW) / 2f + panOffsetX
+            val baseTop = (h - drawH) / 2f + panOffsetY
 
             val shiftX = tiltX
             val shiftY = tiltY

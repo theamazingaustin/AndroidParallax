@@ -101,7 +101,9 @@ class SegmentationEngine(private val context: Context) {
         threshold: Float = 0.50f,
         edgeFeathering: Int = 6,
         maskExpansion: Int = 0,
-        inpaintRadius: Int = 8
+        inpaintRadius: Int = 8,
+        cutoutContrast: Float = 0.85f,
+        clockBehindAllSubjects: Boolean = true
     ): SegmentationResult {
         // Downscale massive camera photos (e.g. 12MP/48MP) to max 1440px to prevent OOM and ensure fast processing
         val maxDim = 1440
@@ -121,14 +123,20 @@ class SegmentationEngine(private val context: Context) {
 
         val w = safeBmp.width
         val h = safeBmp.height
-        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold, maskExpansion=$maskExpansion")
+        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold, behindAll=$clockBehindAllSubjects, contrast=$cutoutContrast")
 
         // 1. Run ML inference
         val (rawMask, maskW, maskH) = runInference(safeBmp)
 
         // Effective threshold with granular mask expansion / contraction
-        // Clamped strictly to 0.35..0.85 so neural background noise (sky, walls) never leaks into cutout!
-        val effectiveThreshold = (threshold - (maskExpansion * 0.015f)).coerceIn(0.35f, 0.85f)
+        // If clockBehindAllSubjects is true (Group Mode), scale down threshold so distant/waving people are captured
+        val baseThreshold = if (clockBehindAllSubjects) {
+            (threshold * 0.65f).coerceIn(0.26f, 0.45f)
+        } else {
+            threshold.coerceIn(0.40f, 0.85f)
+        }
+        val minFloor = if (clockBehindAllSubjects) 0.22f else 0.32f
+        val effectiveThreshold = (baseThreshold - (maskExpansion * 0.015f)).coerceIn(minFloor, 0.85f)
 
         // 2. Saliency check
         var fgCount = 0
@@ -140,7 +148,7 @@ class SegmentationEngine(private val context: Context) {
         val isPortrait = fgRatio in 0.05f..0.85f
         AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
-        // 3. Generate Foreground Cutout Bitmap with Sub-Pixel Bilinear Alpha Channel
+        // 3. Generate Foreground Cutout Bitmap with Sub-Pixel Bilinear Alpha Channel & Contrast Flattening
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
         val cutoutPixels = IntArray(w * h)
@@ -149,12 +157,12 @@ class SegmentationEngine(private val context: Context) {
         val invW = 1.0f / max(1, w - 1)
         val invH = 1.0f / max(1, h - 1)
 
-        // Tight, crisp anti-aliasing ramp (1-2px wide)
-        // Eliminates wide blurry halos and ghost outlines completely!
-        val featherWindow = (edgeFeathering.coerceIn(1, 16) / 16f) * 0.035f
-        val lowBound = (effectiveThreshold - featherWindow).coerceAtLeast(0.30f)
+        // Layer Flattening: higher contrast sharpens the transition so subjects are 100% solid, eliminating semi-transparent ghosting
+        val clampedContrast = cutoutContrast.coerceIn(0.20f, 0.98f)
+        val featherWindow = (1.0f - clampedContrast) * (edgeFeathering.coerceIn(1, 16) / 16f) * 0.04f
+        val lowBound = (effectiveThreshold - featherWindow).coerceAtLeast(minFloor)
         val highBound = (effectiveThreshold + featherWindow).coerceAtMost(0.95f)
-        val denom = max(0.001f, highBound - lowBound)
+        val denom = max(0.0001f, highBound - lowBound)
 
         for (y in 0 until h) {
             val v = y * invH
@@ -163,13 +171,18 @@ class SegmentationEngine(private val context: Context) {
                 val u = x * invW
                 val confidence = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
 
-                // Sub-pixel alpha ramp: 100% solid inside, pure 0 outside, crisp anti-aliased edge
+                // 100% Solid Cutout with razor-sharp anti-aliased subpixel contour
                 val alpha = when {
                     confidence <= lowBound -> 0
                     confidence >= highBound -> 255
                     else -> {
-                        val norm = (confidence - lowBound) / denom
-                        (norm.coerceIn(0f, 1f) * 255).toInt()
+                        val norm = ((confidence - lowBound) / denom).coerceIn(0f, 1f)
+                        val steepNorm = if (norm >= 0.5f) {
+                            1f - 0.5f * Math.pow(2.0 * (1.0 - norm), 2.5).toFloat()
+                        } else {
+                            0.5f * Math.pow(2.0 * norm.toDouble(), 2.5).toFloat()
+                        }
+                        (steepNorm.coerceIn(0f, 1f) * 255).toInt()
                     }
                 }
 

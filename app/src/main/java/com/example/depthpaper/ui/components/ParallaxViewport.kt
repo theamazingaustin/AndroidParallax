@@ -10,6 +10,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +58,7 @@ fun ParallaxViewport(
     simulatedTiltY: Float,
     onTiltChanged: (Float, Float) -> Unit,
     onClockPositionChanged: (Float, Float) -> Unit,
+    onImageTransformChanged: ((Float, Float, Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -66,6 +69,10 @@ fun ParallaxViewport(
     var isDraggingClock by remember { mutableStateOf(false) }
     var currentClockX by remember(project.id) { mutableFloatStateOf(project.lockScreenConfig.horizontalOffsetPercent) }
     var currentClockY by remember(project.id) { mutableFloatStateOf(project.lockScreenConfig.verticalOffsetPercent) }
+
+    var currentScale by remember(project.id, project.imageScale) { mutableFloatStateOf(project.imageScale) }
+    var currentPanX by remember(project.id, project.imagePanX) { mutableFloatStateOf(project.imagePanX) }
+    var currentPanY by remember(project.id, project.imagePanY) { mutableFloatStateOf(project.imagePanY) }
 
     LaunchedEffect(project.lockScreenConfig.horizontalOffsetPercent, project.lockScreenConfig.verticalOffsetPercent) {
         if (!isDraggingClock) {
@@ -124,53 +131,75 @@ fun ParallaxViewport(
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(project.id) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val cfg = project.lockScreenConfig
-                        val clockTargetX = size.width * currentClockX
-                        val clockTargetY = size.height * currentClockY
-                        val hitRadiusX = size.width * 0.45f * cfg.clockScale
-                        // Clock text baseline is at clockTargetY, digits & date extend above
-                        val boxTop = clockTargetY - (size.width * 0.28f * cfg.clockScale)
-                        val boxBottom = clockTargetY + 40f
+                awaitEachGesture {
+                    val firstDown = awaitFirstDown(requireUnconsumed = false)
+                    val cfg = project.lockScreenConfig
+                    val clockTargetX = size.width * currentClockX
+                    val clockTargetY = size.height * currentClockY
+                    val hitRadiusX = size.width * 0.45f * cfg.clockScale
+                    // Clock text baseline is at clockTargetY, digits & date extend above
+                    val boxTop = clockTargetY - (size.width * 0.28f * cfg.clockScale)
+                    val boxBottom = clockTargetY + 40f
 
-                        // If user touched within the clock bounding box, enter clock-drag mode
-                        if (offset.x in (clockTargetX - hitRadiusX)..(clockTargetX + hitRadiusX) &&
-                            offset.y in boxTop..boxBottom
-                        ) {
-                            isDraggingClock = true
-                        } else {
+                    val isClockTouch = firstDown.position.x in (clockTargetX - hitRadiusX)..(clockTargetX + hitRadiusX) &&
+                                       firstDown.position.y in boxTop..boxBottom
+                    var isTwoFinger = false
+
+                    do {
+                        val event = awaitPointerEvent()
+                        val activePointers = event.changes.filter { it.pressed }
+
+                        if (activePointers.size >= 2) {
+                            // Two-finger pinch to zoom & pan the image
+                            isTwoFinger = true
                             isDraggingClock = false
+                            val p0 = activePointers[0]
+                            val p1 = activePointers[1]
+                            val prevDist = (p0.previousPosition - p1.previousPosition).getDistance()
+                            val currDist = (p0.position - p1.position).getDistance()
+                            if (prevDist > 0f) {
+                                val zoomFactor = currDist / prevDist
+                                currentScale = (currentScale * zoomFactor).coerceIn(1.0f, 3.5f)
+                            }
+
+                            val prevCenter = (p0.previousPosition + p1.previousPosition) / 2f
+                            val currCenter = (p0.position + p1.position) / 2f
+                            val panDelta = currCenter - prevCenter
+
+                            currentPanX = (currentPanX + panDelta.x / size.width).coerceIn(-0.6f, 0.6f)
+                            currentPanY = (currentPanY + panDelta.y / size.height).coerceIn(-0.6f, 0.6f)
+
+                            event.changes.forEach { it.consume() }
+                        } else if (activePointers.size == 1 && !isTwoFinger) {
+                            val change = activePointers[0]
+                            val dragAmount = change.position - change.previousPosition
+
+                            if (isClockTouch) {
+                                isDraggingClock = true
+                                currentClockX = (currentClockX + dragAmount.x / size.width).coerceIn(0.10f, 0.90f)
+                                currentClockY = (currentClockY + dragAmount.y / size.height).coerceIn(0.06f, 0.85f)
+                                change.consume()
+                            } else {
+                                // Dragging scene tilts the 3D parallax
+                                val dx = (dragAmount.x / size.width) * 3f
+                                val dy = (dragAmount.y / size.height) * 3f
+                                onTiltChanged(
+                                    (simulatedTiltX + dx).coerceIn(-1f, 1f),
+                                    (simulatedTiltY + dy).coerceIn(-1f, 1f)
+                                )
+                                change.consume()
+                            }
                         }
-                    },
-                    onDragEnd = {
-                        if (isDraggingClock) {
-                            onClockPositionChanged(currentClockX, currentClockY)
-                        }
-                        isDraggingClock = false
-                        onTiltChanged(0f, 0f)
-                    },
-                    onDragCancel = {
-                        if (isDraggingClock) {
-                            onClockPositionChanged(currentClockX, currentClockY)
-                        }
-                        isDraggingClock = false
-                        onTiltChanged(0f, 0f)
-                    }
-                ) { change, dragAmount ->
-                    change.consume()
+                    } while (activePointers.isNotEmpty())
+
                     if (isDraggingClock) {
-                        currentClockX = (currentClockX + dragAmount.x / size.width).coerceIn(0.10f, 0.90f)
-                        currentClockY = (currentClockY + dragAmount.y / size.height).coerceIn(0.06f, 0.85f)
-                    } else {
-                        // Dragging scene tilts the 3D parallax
-                        val dx = (dragAmount.x / size.width) * 3f
-                        val dy = (dragAmount.y / size.height) * 3f
-                        onTiltChanged(
-                            (simulatedTiltX + dx).coerceIn(-1f, 1f),
-                            (simulatedTiltY + dy).coerceIn(-1f, 1f)
-                        )
+                        onClockPositionChanged(currentClockX, currentClockY)
                     }
+                    if (isTwoFinger) {
+                        onImageTransformChanged?.invoke(currentScale, currentPanX, currentPanY)
+                    }
+                    isDraggingClock = false
+                    onTiltChanged(0f, 0f)
                 }
             }
     ) {
@@ -182,14 +211,17 @@ fun ParallaxViewport(
             if (previewSurface == PreviewSurface.AOD) {
                 drawRect(Color.Black, size = size)
                 cutoutBmp?.let { bmp ->
-                    val scale = max(canvasW / bmp.width, canvasH / bmp.height)
-                    val dW = bmp.width * scale
-                    val dH = bmp.height * scale
-                    val left = ((canvasW - dW) / 2f).roundToInt()
-                    val top = ((canvasH - dH) / 2f).roundToInt()
+                    val scale = max(canvasW / bmp.width, canvasH / bmp.height) * currentScale
+                    val dW = (bmp.width * scale).roundToInt()
+                    val dH = (bmp.height * scale).roundToInt()
+                    val panOffsetX = (canvasW * currentPanX).roundToInt()
+                    val panOffsetY = (canvasH * currentPanY).roundToInt()
+                    val left = ((canvasW - dW) / 2f).roundToInt() + panOffsetX
+                    val top = ((canvasH - dH) / 2f).roundToInt() + panOffsetY
                     drawImage(
                         image = bmp.asImageBitmap(),
                         dstOffset = IntOffset(left, top),
+                        dstSize = IntSize(dW, dH),
                         alpha = 0.30f
                     )
                 }
@@ -219,11 +251,13 @@ fun ParallaxViewport(
                 val targetBmp = depthBmp ?: sourceBmp
                 targetBmp?.let { bmp ->
                     val overscan = 1.08f
-                    val scale = max((canvasW * overscan) / bmp.width, (canvasH * overscan) / bmp.height)
+                    val scale = max((canvasW * overscan) / bmp.width, (canvasH * overscan) / bmp.height) * currentScale
                     val drawW = (bmp.width * scale).roundToInt()
                     val drawH = (bmp.height * scale).roundToInt()
-                    val baseLeft = ((canvasW - drawW) / 2f).roundToInt()
-                    val baseTop = ((canvasH - drawH) / 2f).roundToInt()
+                    val panOffsetX = (canvasW * currentPanX).roundToInt()
+                    val panOffsetY = (canvasH * currentPanY).roundToInt()
+                    val baseLeft = ((canvasW - drawW) / 2f).roundToInt() + panOffsetX
+                    val baseTop = ((canvasH - drawH) / 2f).roundToInt() + panOffsetY
                     val shiftX = totalTiltX * canvasW * 0.04f * project.motionConfig.parallaxIntensity
                     val shiftY = totalTiltY * canvasW * 0.04f * project.motionConfig.parallaxIntensity
 
@@ -258,11 +292,13 @@ fun ParallaxViewport(
             val imgH = refBmp?.height?.toFloat() ?: 1000f
 
             val overscan = 1.08f
-            val scale = max((canvasW * overscan) / imgW, (canvasH * overscan) / imgH)
+            val scale = max((canvasW * overscan) / imgW, (canvasH * overscan) / imgH) * currentScale
             val drawW = (imgW * scale).roundToInt()
             val drawH = (imgH * scale).roundToInt()
-            val baseLeft = ((canvasW - drawW) / 2f).roundToInt()
-            val baseTop = ((canvasH - drawH) / 2f).roundToInt()
+            val panOffsetX = (canvasW * currentPanX).roundToInt()
+            val panOffsetY = (canvasH * currentPanY).roundToInt()
+            val baseLeft = ((canvasW - drawW) / 2f).roundToInt() + panOffsetX
+            val baseTop = ((canvasH - drawH) / 2f).roundToInt() + panOffsetY
             val drawSize = IntSize(drawW, drawH)
 
             // Positive differential parallax:

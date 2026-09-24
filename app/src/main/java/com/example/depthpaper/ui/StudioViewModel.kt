@@ -288,12 +288,25 @@ class StudioViewModel(
         _uiState.value = _uiState.value.copy(currentProject = updated)
     }
 
+    fun updateImageTransform(scale: Float, panX: Float, panY: Float) {
+        val cur = _uiState.value.currentProject
+        val updated = cur.copy(
+            imageScale = scale.coerceIn(1.0f, 3.5f),
+            imagePanX = panX.coerceIn(-0.6f, 0.6f),
+            imagePanY = panY.coerceIn(-0.6f, 0.6f)
+        )
+        repository.saveProjectMetaOnly(updated)
+        _uiState.value = _uiState.value.copy(currentProject = updated)
+    }
+
     fun reprocessWithTuning(
         threshold: Float = _uiState.value.currentProject.threshold,
         feathering: Int = _uiState.value.currentProject.edgeFeathering,
         maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
         inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
-        modelType: SegmentationModelType? = null
+        modelType: SegmentationModelType? = null,
+        clockBehindAllSubjects: Boolean = _uiState.value.currentProject.clockBehindAllSubjects,
+        cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast
     ) {
         val src = _uiState.value.sourceBitmap ?: return
         _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "Refining segmentation & layers...")
@@ -305,14 +318,18 @@ class StudioViewModel(
                 threshold = threshold,
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
-                inpaintRadius = inpaintRadius
+                inpaintRadius = inpaintRadius,
+                cutoutContrast = cutoutContrast,
+                clockBehindAllSubjects = clockBehindAllSubjects
             )
 
             val cur = _uiState.value.currentProject.copy(
                 threshold = threshold,
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
-                inpaintRadius = inpaintRadius
+                inpaintRadius = inpaintRadius,
+                clockBehindAllSubjects = clockBehindAllSubjects,
+                cutoutContrast = cutoutContrast
             )
 
             val saved = repository.saveProject(

@@ -137,6 +137,11 @@ data class WallpaperProject(
     val edgeFeathering: Int = 6,
     val maskExpansion: Int = 0,
     val inpaintRadius: Int = 8,
+    val imageScale: Float = 1.0f,
+    val imagePanX: Float = 0.0f,
+    val imagePanY: Float = 0.0f,
+    val clockBehindAllSubjects: Boolean = true,
+    val cutoutContrast: Float = 0.85f,
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
@@ -158,6 +163,11 @@ data class WallpaperProject(
         put("edgeFeathering", edgeFeathering)
         put("maskExpansion", maskExpansion)
         put("inpaintRadius", inpaintRadius)
+        put("imageScale", imageScale.toDouble())
+        put("imagePanX", imagePanX.toDouble())
+        put("imagePanY", imagePanY.toDouble())
+        put("clockBehindAllSubjects", clockBehindAllSubjects)
+        put("cutoutContrast", cutoutContrast.toDouble())
         put("motionConfig", motionConfig.toJson())
         put("lockScreenConfig", lockScreenConfig.toJson())
         put("homeScreenConfig", homeScreenConfig.toJson())
@@ -181,6 +191,11 @@ data class WallpaperProject(
             edgeFeathering = json.optInt("edgeFeathering", 6),
             maskExpansion = json.optInt("maskExpansion", 0),
             inpaintRadius = json.optInt("inpaintRadius", 8),
+            imageScale = json.optDouble("imageScale", 1.0).toFloat(),
+            imagePanX = json.optDouble("imagePanX", 0.0).toFloat(),
+            imagePanY = json.optDouble("imagePanY", 0.0).toFloat(),
+            clockBehindAllSubjects = json.optBoolean("clockBehindAllSubjects", true),
+            cutoutContrast = json.optDouble("cutoutContrast", 0.85).toFloat(),
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),
