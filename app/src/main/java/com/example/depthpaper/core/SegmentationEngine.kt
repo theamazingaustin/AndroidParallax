@@ -155,6 +155,11 @@ class SegmentationEngine(private val context: Context) {
         val scaleX = maskW.toFloat() / w
         val scaleY = maskH.toFloat() / h
 
+        val featherWindow = (edgeFeathering.coerceIn(1, 16) / 16f) * 0.08f
+        val lowBound = (threshold - featherWindow).coerceAtLeast(0.01f)
+        val highBound = (threshold + featherWindow).coerceAtMost(0.99f)
+        val denom = max(0.001f, highBound - lowBound)
+
         for (y in 0 until h) {
             val my = min(maskH - 1, (y * scaleY).toInt())
             val maskRow = my * maskW
@@ -163,12 +168,12 @@ class SegmentationEngine(private val context: Context) {
                 val mx = min(maskW - 1, (x * scaleX).toInt())
                 val confidence = refinedMask[maskRow + mx]
 
-                // Smooth alpha ramp
+                // Robust alpha ramp: guarantees 100% opaque subject for all confidence >= highBound
                 val alpha = when {
-                    confidence <= threshold * 0.7f -> 0
-                    confidence >= threshold * 1.3f -> 255
+                    confidence <= lowBound -> 0
+                    confidence >= highBound -> 255
                     else -> {
-                        val norm = (confidence - threshold * 0.7f) / (threshold * 0.6f)
+                        val norm = (confidence - lowBound) / denom
                         (norm.coerceIn(0f, 1f) * 255).toInt()
                     }
                 }

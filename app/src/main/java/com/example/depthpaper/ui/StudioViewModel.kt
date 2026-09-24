@@ -24,7 +24,8 @@ import kotlinx.coroutines.withContext
 enum class PreviewSurface {
     LOCK_SCREEN,
     HOME_SCREEN,
-    AOD
+    AOD,
+    DEPTH_MAP
 }
 
 enum class StudioTab {

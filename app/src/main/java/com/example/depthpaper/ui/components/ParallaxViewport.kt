@@ -209,6 +209,39 @@ fun ParallaxViewport(
                 return@Canvas
             }
 
+            // --- 3D Depth Map Inspection Mode ---
+            if (previewSurface == PreviewSurface.DEPTH_MAP) {
+                drawRect(Color.Black, size = size)
+                val targetBmp = depthBmp ?: sourceBmp
+                targetBmp?.let { bmp ->
+                    val overscan = 1.08f
+                    val scale = max((canvasW * overscan) / bmp.width, (canvasH * overscan) / bmp.height)
+                    val drawW = (bmp.width * scale).roundToInt()
+                    val drawH = (bmp.height * scale).roundToInt()
+                    val baseLeft = ((canvasW - drawW) / 2f).roundToInt()
+                    val baseTop = ((canvasH - drawH) / 2f).roundToInt()
+                    val shiftX = totalTiltX * canvasW * 0.04f * project.motionConfig.parallaxIntensity
+                    val shiftY = totalTiltY * canvasW * 0.04f * project.motionConfig.parallaxIntensity
+
+                    drawImage(
+                        image = bmp.asImageBitmap(),
+                        dstOffset = IntOffset(baseLeft + shiftX.roundToInt(), baseTop + shiftY.roundToInt()),
+                        dstSize = IntSize(drawW, drawH)
+                    )
+                }
+
+                drawIntoCanvas { nativeCanvas ->
+                    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        textSize = canvasW * 0.038f
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        setShadowLayer(10f, 0f, 2f, android.graphics.Color.BLACK)
+                    }
+                    nativeCanvas.nativeCanvas.drawText("3D DEPTH MAP (WHITE = FOREGROUND)", canvasW * 0.5f, canvasH * 0.94f, paint)
+                }
+                return@Canvas
+            }
+
             // --- Normal & Parallax Rendering ---
             val intensity = project.motionConfig.parallaxIntensity
             val maxShift = canvasW * 0.04f * intensity
