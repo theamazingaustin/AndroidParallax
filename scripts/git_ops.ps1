@@ -74,6 +74,33 @@ if ($Wait) {
                     Write-Output "RELEASE_PAGE: $($targetRelease.html_url)"
                     Write-Output "RELEASE_TAG: $($targetRelease.tag_name)"
                     Write-Output "APK_SIZE: $([math]::Round($apk.size / 1MB, 2)) MB"
+
+                    # Check build time & quota usage
+                    try {
+                        $runsResp = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/actions/runs?per_page=30" -Headers $headers
+                        $latestRun = $runsResp.workflow_runs | Where-Object { $_.status -eq "completed" } | Select-Object -First 1
+                        if ($latestRun) {
+                            $start = [DateTime]::Parse($latestRun.run_started_at)
+                            $end = [DateTime]::Parse($latestRun.updated_at)
+                            $runDur = $end - $start
+                            Write-Output "RUN_BUILD_TIME: $($runDur.Minutes)m $($runDur.Seconds)s"
+                        }
+
+                        $currentMonth = (Get-Date).ToString("yyyy-MM")
+                        $monthRuns = $runsResp.workflow_runs | Where-Object { $_.created_at -like "$currentMonth*" -and $_.status -eq "completed" }
+                        $totalMins = 0
+                        foreach ($r in $monthRuns) {
+                            $s = [DateTime]::Parse($r.run_started_at)
+                            $e = [DateTime]::Parse($r.updated_at)
+                            $totalMins += [math]::Max(1, [math]::Ceiling(($e - $s).TotalMinutes))
+                        }
+                        $totalQuota = 2000
+                        $pct = [math]::Round(($totalMins / $totalQuota) * 100, 1)
+                        Write-Output "GITHUB_ACTIONS_BUILD_TIME_USED: $totalMins / $totalQuota minutes ($pct%)"
+                    } catch {
+                        Write-Output "BUILD_TIME_CHECK_NOTE: Unable to fetch usage stats ($($_))"
+                    }
+
                     Write-Output "=================================================="
                     exit 0
                 }

@@ -48,4 +48,19 @@ class CoreEnginesTest {
         val (tiltX, _) = filter.update(rawRoll = 25f, rawPitch = -45f)
         assertTrue(tiltX > 0.8f)
     }
+
+    @Test
+    fun testGuidedFilterCoefficientsAndSampling() {
+        val w = 8
+        val h = 8
+        val lum = FloatArray(w * h) { (it % 8) / 8.0f }
+        val mask = FloatArray(w * h) { if (it < 32) 1.0f else 0.0f }
+
+        val coeff = GuidedMattingFilter.computeCoefficientsFromLuminance(lum, mask, w, h, radius = 2)
+        assertEquals(w, coeff.w)
+        assertEquals(h, coeff.h)
+
+        val alpha = GuidedMattingFilter.sampleGuidedAlpha(coeff, 0.5f, 0.1f, 0.5f)
+        assertTrue(alpha in 0f..1f)
+    }
 }

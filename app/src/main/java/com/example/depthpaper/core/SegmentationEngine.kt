@@ -15,9 +15,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class SegmentationModelType(val assetPath: String, val displayName: String) {
-    GROUP_MULTICLASS("models/selfie_multiclass.tflite", "People & Groups"),
+    ENSEMBLE_DEEPLAB("models/deeplab_v3.tflite", "DeepLab Ensemble (Recommended)"),
+    GROUP_MULTICLASS("models/selfie_multiclass.tflite", "Portrait Multiclass"),
     SELFIE_FAST("models/selfie_segmenter.tflite", "Portrait Fast"),
-    UNIVERSAL_SCENERY("models/selfie_multiclass.tflite", "Nature, Structures & Objects")
+    UNIVERSAL_SCENERY("models/deeplab_v3.tflite", "Nature, Structures & Objects")
 }
 
 /**
@@ -40,28 +41,35 @@ data class SegmentationResult(
  */
 class SegmentationEngine(private val context: Context) {
 
-    private var segmenter: ImageSegmenter? = null
-    var currentModelType: SegmentationModelType = SegmentationModelType.GROUP_MULTICLASS
+    private var primarySegmenter: ImageSegmenter? = null
+    private var secondarySegmenter: ImageSegmenter? = null
+    var currentModelType: SegmentationModelType = SegmentationModelType.ENSEMBLE_DEEPLAB
         private set
 
     init {
-        initSegmenter(currentModelType)
+        initSegmenters(currentModelType)
     }
 
     fun setModelType(type: SegmentationModelType) {
-        if (currentModelType != type || segmenter == null) {
+        if (currentModelType != type || primarySegmenter == null) {
             currentModelType = type
-            initSegmenter(type)
+            initSegmenters(type)
         }
     }
 
-    private fun initSegmenter(type: SegmentationModelType) {
-        segmenter?.close()
-        segmenter = null
-        try {
-            // First attempt: Hardware acceleration via Adreno GPU / Hexagon NPU
+    private fun initSegmenters(type: SegmentationModelType) {
+        close()
+        primarySegmenter = createSegmenter(type.assetPath)
+        if (type == SegmentationModelType.ENSEMBLE_DEEPLAB) {
+            // In ensemble mode, fuse DeepLabV3 with Selfie Segmenter for close-up portraits
+            secondarySegmenter = createSegmenter("models/selfie_segmenter.tflite")
+        }
+    }
+
+    private fun createSegmenter(assetPath: String): ImageSegmenter? {
+        return try {
             val baseOptions = BaseOptions.builder()
-                .setModelAssetPath(type.assetPath)
+                .setModelAssetPath(assetPath)
                 .setDelegate(com.google.mediapipe.tasks.core.Delegate.GPU)
                 .build()
 
@@ -71,13 +79,14 @@ class SegmentationEngine(private val context: Context) {
                 .setOutputConfidenceMasks(true)
                 .build()
 
-            segmenter = ImageSegmenter.createFromOptions(context, options)
-            AppLogger.i("SegmentationEngine", "Initialized model on GPU/NPU: ${type.displayName}")
+            val seg = ImageSegmenter.createFromOptions(context, options)
+            AppLogger.i("SegmentationEngine", "Initialized $assetPath on GPU/NPU")
+            seg
         } catch (e: Exception) {
-            AppLogger.w("SegmentationEngine", "GPU delegate init failed (${e.message}), falling back to CPU")
+            AppLogger.w("SegmentationEngine", "GPU init failed for $assetPath (${e.message}), falling back to CPU")
             try {
                 val fallbackBaseOptions = BaseOptions.builder()
-                    .setModelAssetPath(type.assetPath)
+                    .setModelAssetPath(assetPath)
                     .setDelegate(com.google.mediapipe.tasks.core.Delegate.CPU)
                     .build()
                 val options = ImageSegmenter.ImageSegmenterOptions.builder()
@@ -85,11 +94,12 @@ class SegmentationEngine(private val context: Context) {
                     .setRunningMode(RunningMode.IMAGE)
                     .setOutputConfidenceMasks(true)
                     .build()
-                segmenter = ImageSegmenter.createFromOptions(context, options)
-                AppLogger.i("SegmentationEngine", "Initialized model on CPU: ${type.displayName}")
+                val seg = ImageSegmenter.createFromOptions(context, options)
+                AppLogger.i("SegmentationEngine", "Initialized $assetPath on CPU")
+                seg
             } catch (e2: Exception) {
-                AppLogger.e("SegmentationEngine", "Both GPU and CPU failed: ${e2.message}", e2)
-                segmenter = null
+                AppLogger.e("SegmentationEngine", "Failed to load $assetPath: ${e2.message}", e2)
+                null
             }
         }
     }
@@ -104,8 +114,7 @@ class SegmentationEngine(private val context: Context) {
         edgeFeathering: Int = 6,
         maskExpansion: Int = 0,
         inpaintRadius: Int = 8,
-        cutoutContrast: Float = 0.85f,
-        clockBehindAllSubjects: Boolean = true
+        cutoutContrast: Float = 0.85f
     ): SegmentationResult {
         // Downscale massive camera photos (e.g. 12MP/48MP) to max 1440px to prevent OOM and ensure fast processing
         val maxDim = 1440
@@ -125,23 +134,23 @@ class SegmentationEngine(private val context: Context) {
 
         val w = safeBmp.width
         val h = safeBmp.height
-        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold, behindAll=$clockBehindAllSubjects, contrast=$cutoutContrast")
+        AppLogger.i("SegmentationEngine", "processImage: ${w}x${h} (source was ${srcW}x${srcH}), model=${currentModelType.displayName}, threshold=$threshold, contrast=$cutoutContrast")
 
         // 1. Run ML inference or Universal Saliency
         var (rawMask, maskW, maskH) = if (currentModelType == SegmentationModelType.UNIVERSAL_SCENERY) {
             computeUniversalSaliencyMask(safeBmp)
+        } else if (currentModelType == SegmentationModelType.ENSEMBLE_DEEPLAB && secondarySegmenter != null) {
+            // Ensemble Fusion: DeepLabV3 (for groups/bodies/hands) + Selfie Segmenter (for face/hair details)
+            val deepLab = runInference(primarySegmenter, safeBmp)
+            val selfie = runInference(secondarySegmenter, safeBmp)
+            fuseMasks(deepLab, selfie)
         } else {
-            runInference(safeBmp)
+            runInference(primarySegmenter, safeBmp)
         }
 
         // Effective threshold with granular mask expansion / contraction
-        // If clockBehindAllSubjects is true (Group Mode), scale down threshold so distant/waving people are captured
-        val baseThreshold = if (clockBehindAllSubjects) {
-            (threshold * 0.65f).coerceIn(0.26f, 0.45f)
-        } else {
-            threshold.coerceIn(0.40f, 0.85f)
-        }
-        val minFloor = if (clockBehindAllSubjects) 0.22f else 0.32f
+        val baseThreshold = (threshold * 0.65f).coerceIn(0.25f, 0.50f)
+        val minFloor = 0.22f
         val effectiveThreshold = (baseThreshold - (maskExpansion * 0.015f)).coerceIn(minFloor, 0.85f)
 
         // 2. Saliency check
@@ -171,7 +180,17 @@ class SegmentationEngine(private val context: Context) {
         val isPortrait = fgRatio in 0.05f..0.85f
         AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
-        // 3. Generate Foreground Cutout Bitmap with Sub-Pixel Bilinear Alpha Channel & Contrast Flattening
+        // 3. Compute High-Resolution Guided Filter Coefficients for Sub-Pixel Edge Snapping
+        val guidedCoeff = GuidedMattingFilter.computeCoefficients(
+            guideBmp = safeBmp,
+            rawMask = rawMask,
+            maskWidth = maskW,
+            maskHeight = maskH,
+            radius = 6,
+            eps = 0.005f
+        )
+
+        // 4. Generate Foreground Cutout Bitmap with Guided Edge Snapping & Contrast Flattening
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
         val cutoutPixels = IntArray(w * h)
@@ -192,7 +211,14 @@ class SegmentationEngine(private val context: Context) {
             val rowOffset = y * w
             for (x in 0 until w) {
                 val u = x * invW
-                val confidence = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
+                val c = sourcePixels[rowOffset + x]
+                val r = (c shr 16 and 0xFF) / 255f
+                val g = (c shr 8 and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val highResLum = 0.299f * r + 0.587f * g + 0.114f * b
+
+                // Sample guided alpha that snaps to the actual photo color boundary
+                val confidence = GuidedMattingFilter.sampleGuidedAlpha(guidedCoeff, u, v, highResLum)
 
                 // 100% Solid Cutout with razor-sharp anti-aliased subpixel contour
                 val alpha = when {
@@ -209,7 +235,7 @@ class SegmentationEngine(private val context: Context) {
                     }
                 }
 
-                val rgb = sourcePixels[rowOffset + x] and 0x00FFFFFF
+                val rgb = c and 0x00FFFFFF
                 cutoutPixels[rowOffset + x] = (alpha shl 24) or rgb
             }
         }
@@ -224,7 +250,7 @@ class SegmentationEngine(private val context: Context) {
         val total = w * h
         AppLogger.i("SegmentationEngine", "Cutout stats: transparent=${transparentCount * 100 / total}%, opaque=${opaqueCount * 100 / total}%")
 
-        // 4. Generate Continuous 3D Depth Map with Bilinear Sampling & Contrast Flattening
+        // 5. Generate Continuous 3D Depth Map with Guided High-Res Sampling & Contrast Flattening
         val depthBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val depthPixels = IntArray(w * h)
         for (y in 0 until h) {
@@ -232,7 +258,13 @@ class SegmentationEngine(private val context: Context) {
             val rowOffset = y * w
             for (x in 0 until w) {
                 val u = x * invW
-                val conf = InpaintingEngine.sampleMaskBilinear(rawMask, maskW, maskH, u, v)
+                val c = sourcePixels[rowOffset + x]
+                val r = (c shr 16 and 0xFF) / 255f
+                val g = (c shr 8 and 0xFF) / 255f
+                val b = (c and 0xFF) / 255f
+                val highResLum = 0.299f * r + 0.587f * g + 0.114f * b
+
+                val conf = GuidedMattingFilter.sampleGuidedAlpha(guidedCoeff, u, v, highResLum)
                 // Shape confidence according to Layer Flatness (clampedContrast) and bounds so subject turns pure white
                 val shapedConf = when {
                     conf <= lowBound -> 0f
@@ -247,7 +279,7 @@ class SegmentationEngine(private val context: Context) {
         }
         depthBmp.setPixels(depthPixels, 0, w, 0, 0, w, h)
 
-        // 5. Inpainted background plate (strictly eroded under subject to avoid outer spill)
+        // 6. Inpainted background plate (strictly eroded under subject to avoid outer spill)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = rawMask,
@@ -269,11 +301,34 @@ class SegmentationEngine(private val context: Context) {
         )
     }
 
-    private fun runInference(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        segmenter?.let { seg ->
+    private fun fuseMasks(
+        m1: Triple<FloatArray, Int, Int>,
+        m2: Triple<FloatArray, Int, Int>
+    ): Triple<FloatArray, Int, Int> {
+        val outW = max(m1.second, m2.second)
+        val outH = max(m1.third, m2.third)
+        val fused = FloatArray(outW * outH)
+        val invW = 1.0f / max(1, outW - 1)
+        val invH = 1.0f / max(1, outH - 1)
+
+        for (y in 0 until outH) {
+            val v = y * invH
+            val rowOffset = y * outW
+            for (x in 0 until outW) {
+                val u = x * invW
+                val c1 = InpaintingEngine.sampleMaskBilinear(m1.first, m1.second, m1.third, u, v)
+                val c2 = InpaintingEngine.sampleMaskBilinear(m2.first, m2.second, m2.third, u, v)
+                fused[rowOffset + x] = max(c1, c2)
+            }
+        }
+        return Triple(fused, outW, outH)
+    }
+
+    private fun runInference(seg: ImageSegmenter?, bitmap: Bitmap): Triple<FloatArray, Int, Int> {
+        seg?.let { segmenterInstance ->
             try {
                 val mpImage = BitmapImageBuilder(bitmap).build()
-                val result: ImageSegmenterResult = seg.segment(mpImage)
+                val result: ImageSegmenterResult = segmenterInstance.segment(mpImage)
                 val masks = result.confidenceMasks()
                 if (masks.isPresent && masks.get().isNotEmpty()) {
                     val maskList = masks.get()
@@ -283,23 +338,59 @@ class SegmentationEngine(private val context: Context) {
                     val floatArray = FloatArray(totalPixels)
 
                     if (maskList.size == 2) {
-                        // Two masks: index 0 is background, index 1 is person foreground!
+                        // Binary model (selfie_segmenter.tflite): index 1 is person foreground
                         val byteBuffer = ByteBufferExtractor.extract(maskList[1])
                         byteBuffer.order(ByteOrder.nativeOrder())
                         byteBuffer.rewind()
                         byteBuffer.asFloatBuffer().get(floatArray)
                         val maxV = floatArray.maxOrNull() ?: 0f
-                        AppLogger.i("SegmentationEngine", "2-mask inference success: ${mW}x${mH}, maxConf=$maxV")
+                        AppLogger.i("SegmentationEngine", "Binary inference success: ${mW}x${mH}, maxConf=$maxV")
+                        return Triple(floatArray, mW, mH)
+                    } else if (maskList.size == 21) {
+                        // DeepLabV3 (Pascal VOC 21 classes): index 15 is person, 8, 12, 3, 13 are pets
+                        val personBuffer = ByteBufferExtractor.extract(maskList[15])
+                        personBuffer.order(ByteOrder.nativeOrder())
+                        personBuffer.rewind()
+                        val pb = personBuffer.asFloatBuffer()
+
+                        val petIndices = intArrayOf(8, 12, 3, 13) // cat, dog, bird, horse
+                        val petBuffers = petIndices.map { idx ->
+                            val buf = ByteBufferExtractor.extract(maskList[idx])
+                            buf.order(ByteOrder.nativeOrder())
+                            buf.rewind()
+                            buf.asFloatBuffer()
+                        }
+                        for (i in 0 until totalPixels) {
+                            var conf = pb.get(i)
+                            for (petBuf in petBuffers) {
+                                conf = max(conf, petBuf.get(i))
+                            }
+                            floatArray[i] = conf.coerceIn(0f, 1f)
+                        }
+                        val maxV = floatArray.maxOrNull() ?: 0f
+                        AppLogger.i("SegmentationEngine", "DeepLabV3 inference success: ${mW}x${mH}, maxConf=$maxV")
                         return Triple(floatArray, mW, mH)
                     } else if (maskList.size > 2) {
-                        // Multiclass: index 0 is background, 1..5 are human classes (hair, skin, clothes)
-                        // Foreground probability is 1.0 - P(background)
+                        // Multiclass: 1: hair, 2: body-skin, 3: face-skin, 4: clothes, 5: others
+                        // Sum human parts to prevent background leakage and eliminate hollow head artifacts
+                        val humanBuffers = (1 until maskList.size).map { c ->
+                            val buf = ByteBufferExtractor.extract(maskList[c])
+                            buf.order(ByteOrder.nativeOrder())
+                            buf.rewind()
+                            buf.asFloatBuffer()
+                        }
                         val bgBuffer = ByteBufferExtractor.extract(maskList[0])
                         bgBuffer.order(ByteOrder.nativeOrder())
                         bgBuffer.rewind()
-                        val fb = bgBuffer.asFloatBuffer()
+                        val bgb = bgBuffer.asFloatBuffer()
+
                         for (i in 0 until totalPixels) {
-                            floatArray[i] = (1f - fb.get(i)).coerceIn(0f, 1f)
+                            var sumHuman = 0f
+                            for (buf in humanBuffers) {
+                                sumHuman += buf.get(i)
+                            }
+                            val notBg = (1f - bgb.get(i)).coerceIn(0f, 1f)
+                            floatArray[i] = max(sumHuman, notBg).coerceIn(0f, 1f)
                         }
                         val maxV = floatArray.maxOrNull() ?: 0f
                         AppLogger.i("SegmentationEngine", "Multiclass (${maskList.size} classes) inference success: ${mW}x${mH}, maxConf=$maxV")
@@ -336,7 +427,6 @@ class SegmentationEngine(private val context: Context) {
                 val g = (c shr 8 and 0xFF) / 255f
                 val b = (c and 0xFF) / 255f
                 val lum = 0.299f * r + 0.587f * g + 0.114f * b
-                // Saturation/contrast heuristic
                 val maxC = max(r, max(g, b))
                 val minC = min(r, min(g, b))
                 val sat = if (maxC == 0f) 0f else (maxC - minC) / maxC
@@ -394,7 +484,6 @@ class SegmentationEngine(private val context: Context) {
 
         for (y in 1 until mH - 1) {
             val yNorm = y.toFloat() / mH
-            // Perspective depth prior: closer objects are lower in the camera frustum
             val perspectiveWeight = 0.30f + 0.70f * (yNorm * yNorm)
 
             for (x in 1 until mW - 1) {
@@ -405,14 +494,12 @@ class SegmentationEngine(private val context: Context) {
                 val b = (c and 0xFF) / 255f
                 val pLum = lum[idx]
 
-                // Color difference from top sky baseline
                 val dR = r - skyR
                 val dG = g - skyG
                 val dB = b - skyB
                 val chromDist = Math.sqrt((dR * dR + dG * dG + dB * dB).toDouble()).toFloat()
                 val lumDist = Math.abs(pLum - skyLum)
 
-                // Sobel edge filter (structural boundaries of buildings, trees, objects)
                 val gx = (lum[(y - 1) * mW + (x + 1)] + 2f * lum[y * mW + (x + 1)] + lum[(y + 1) * mW + (x + 1)]) -
                          (lum[(y - 1) * mW + (x - 1)] + 2f * lum[y * mW + (x - 1)] + lum[(y + 1) * mW + (x - 1)])
                 val gy = (lum[(y + 1) * mW + (x - 1)] + 2f * lum[(y + 1) * mW + x] + lum[(y + 1) * mW + (x + 1)]) -
@@ -431,7 +518,6 @@ class SegmentationEngine(private val context: Context) {
         val range = max(0.001f, maxScore - minScore)
         for (i in 0 until mW * mH) {
             val norm = ((scores[i] - minScore) / range).coerceIn(0f, 1f)
-            // Sharpen the subject curve so sky falls to 0 while foreground subjects rise to 1
             mask[i] = if (norm > 0.40f) {
                 (0.5f + (norm - 0.40f) * 1.5f).coerceIn(0f, 1f)
             } else {
@@ -445,8 +531,12 @@ class SegmentationEngine(private val context: Context) {
 
     fun close() {
         try {
-            segmenter?.close()
+            primarySegmenter?.close()
         } catch (_: Exception) {}
-        segmenter = null
+        try {
+            secondarySegmenter?.close()
+        } catch (_: Exception) {}
+        primarySegmenter = null
+        secondarySegmenter = null
     }
 }

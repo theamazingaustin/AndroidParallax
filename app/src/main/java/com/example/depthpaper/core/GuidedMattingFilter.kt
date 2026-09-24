@@ -12,20 +12,24 @@ import kotlin.math.min
  */
 object GuidedMattingFilter {
 
+    data class GuidedCoefficients(
+        val meanA: FloatArray,
+        val meanB: FloatArray,
+        val w: Int,
+        val h: Int
+    )
+
     /**
-     * Refines [rawMask] using [guideBmp] as the structural guide.
-     * @param radius Window radius for local statistics (typically 4..12).
-     * @param eps Regularization parameter (penalizes large gradients in a, typically 1e-3..1e-2).
+     * Computes the linear guided filter coefficients (meanA, meanB) on the subsampled grid.
      */
-    fun filter(
+    fun computeCoefficients(
         guideBmp: Bitmap,
         rawMask: FloatArray,
         maskWidth: Int,
         maskHeight: Int,
         radius: Int = 6,
-        eps: Float = 0.01f
-    ): FloatArray {
-        // Resample guide to mask dimensions if necessary for fast filtering
+        eps: Float = 0.008f
+    ): GuidedCoefficients {
         val w = maskWidth
         val h = maskHeight
         val n = w * h
@@ -38,7 +42,6 @@ object GuidedMattingFilter {
         }
         scaledGuide.getPixels(guidePixels, 0, w, 0, 0, w, h)
 
-        // Convert guide RGB to luminance channel in [0, 1]
         val I = FloatArray(n)
         for (i in 0 until n) {
             val c = guidePixels[i]
@@ -48,7 +51,25 @@ object GuidedMattingFilter {
             I[i] = 0.299f * r + 0.587f * g + 0.114f * b
         }
 
-        // Fast Box Filter passes
+        if (scaledGuide != guideBmp && !scaledGuide.isRecycled) {
+            scaledGuide.recycle()
+        }
+
+        return computeCoefficientsFromLuminance(I, rawMask, w, h, radius, eps)
+    }
+
+    /**
+     * Core guided filter regression computed on luminance array [I].
+     */
+    fun computeCoefficientsFromLuminance(
+        I: FloatArray,
+        rawMask: FloatArray,
+        w: Int,
+        h: Int,
+        radius: Int = 6,
+        eps: Float = 0.008f
+    ): GuidedCoefficients {
+        val n = w * h
         val meanI = boxFilter(I, w, h, radius)
         val meanP = boxFilter(rawMask, w, h, radius)
 
@@ -67,9 +88,58 @@ object GuidedMattingFilter {
         val meanA = boxFilter(a, w, h, radius)
         val meanB = boxFilter(b, w, h, radius)
 
+        return GuidedCoefficients(meanA, meanB, w, h)
+    }
+
+    /**
+     * Evaluates the guided alpha value at sub-pixel location (u, v) using the high-resolution RGB luminance.
+     * This transfers the 1-pixel true color boundaries from the photograph into the alpha mask.
+     */
+    fun sampleGuidedAlpha(
+        coeff: GuidedCoefficients,
+        u: Float,
+        v: Float,
+        highResLum: Float
+    ): Float {
+        val a = InpaintingEngine.sampleMaskBilinear(coeff.meanA, coeff.w, coeff.h, u, v)
+        val b = InpaintingEngine.sampleMaskBilinear(coeff.meanB, coeff.w, coeff.h, u, v)
+        return (a * highResLum + b).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Refines [rawMask] using [guideBmp] as the structural guide.
+     * @param radius Window radius for local statistics (typically 4..12).
+     * @param eps Regularization parameter (penalizes large gradients in a, typically 1e-3..1e-2).
+     */
+    fun filter(
+        guideBmp: Bitmap,
+        rawMask: FloatArray,
+        maskWidth: Int,
+        maskHeight: Int,
+        radius: Int = 6,
+        eps: Float = 0.01f
+    ): FloatArray {
+        val coeff = computeCoefficients(guideBmp, rawMask, maskWidth, maskHeight, radius, eps)
+        val w = maskWidth
+        val h = maskHeight
+        val n = w * h
+
+        val guidePixels = IntArray(n)
+        val scaledGuide = if (guideBmp.width != w || guideBmp.height != h) {
+            Bitmap.createScaledBitmap(guideBmp, w, h, true)
+        } else {
+            guideBmp
+        }
+        scaledGuide.getPixels(guidePixels, 0, w, 0, 0, w, h)
+
         val q = FloatArray(n)
         for (i in 0 until n) {
-            val v = meanA[i] * I[i] + meanB[i]
+            val c = guidePixels[i]
+            val r = (c shr 16 and 0xFF) / 255f
+            val g = (c shr 8 and 0xFF) / 255f
+            val b = (c and 0xFF) / 255f
+            val lum = 0.299f * r + 0.587f * g + 0.114f * b
+            val v = coeff.meanA[i] * lum + coeff.meanB[i]
             q[i] = min(1f, max(0f, v))
         }
 

@@ -305,7 +305,6 @@ class StudioViewModel(
         maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
         inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
         modelType: SegmentationModelType? = null,
-        clockBehindAllSubjects: Boolean = _uiState.value.currentProject.clockBehindAllSubjects,
         cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast
     ) {
         val src = _uiState.value.sourceBitmap ?: return
@@ -319,8 +318,7 @@ class StudioViewModel(
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius,
-                cutoutContrast = cutoutContrast,
-                clockBehindAllSubjects = clockBehindAllSubjects
+                cutoutContrast = cutoutContrast
             )
 
             val cur = _uiState.value.currentProject.copy(
@@ -328,7 +326,6 @@ class StudioViewModel(
                 edgeFeathering = feathering,
                 maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius,
-                clockBehindAllSubjects = clockBehindAllSubjects,
                 cutoutContrast = cutoutContrast
             )
 

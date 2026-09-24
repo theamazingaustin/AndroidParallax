@@ -564,7 +564,6 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var feathering by remember(project.id, project.edgeFeathering) { mutableIntStateOf(project.edgeFeathering) }
     var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
-    var clockBehindAllSubjects by remember(project.id, project.clockBehindAllSubjects) { mutableStateOf(project.clockBehindAllSubjects) }
     var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
     var selectedModel by remember { mutableStateOf(viewModel.getCurrentModelType()) }
 
@@ -629,11 +628,16 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
         // 2. AI Segmentation Engine with Explanatory Card
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("AI Segmentation Engine", fontSize = 12.sp, color = Color.Gray)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    selected = selectedModel == SegmentationModelType.ENSEMBLE_DEEPLAB,
+                    onClick = { selectedModel = SegmentationModelType.ENSEMBLE_DEEPLAB },
+                    label = { Text("Ensemble (Smart)", fontSize = 11.sp) }
+                )
                 FilterChip(
                     selected = selectedModel == SegmentationModelType.GROUP_MULTICLASS,
                     onClick = { selectedModel = SegmentationModelType.GROUP_MULTICLASS },
-                    label = { Text("Group / People", fontSize = 11.sp) }
+                    label = { Text("Multiclass", fontSize = 11.sp) }
                 )
                 FilterChip(
                     selected = selectedModel == SegmentationModelType.SELFIE_FAST,
@@ -643,7 +647,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 FilterChip(
                     selected = selectedModel == SegmentationModelType.UNIVERSAL_SCENERY,
                     onClick = { selectedModel = SegmentationModelType.UNIVERSAL_SCENERY },
-                    label = { Text("Nature / Objects", fontSize = 11.sp) }
+                    label = { Text("Nature", fontSize = 11.sp) }
                 )
             }
 
@@ -661,44 +665,20 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = when (selectedModel) {
+                            SegmentationModelType.ENSEMBLE_DEEPLAB ->
+                                "Ensemble Smart Engine: Fuses DeepLabV3 (for groups, full-body poses, and waving hands) with portrait neural matting. Sub-pixel Guided Filter snaps to real camera photo edges."
                             SegmentationModelType.GROUP_MULTICLASS ->
-                                "Group & Multi-Subject Engine: Detects multiple people, full-body poses, and family portraits."
+                                "Multiclass Portrait Engine: Neural segmentation summing individual human body, hair, and clothing layers."
                             SegmentationModelType.SELFIE_FAST ->
-                                "Selfie Portrait Engine: Ultra-fast neural model tuned for single or close-up portraits."
+                                "Selfie Portrait Engine: Ultra-fast binary neural model tuned for close-up portraits."
                             SegmentationModelType.UNIVERSAL_SCENERY ->
-                                "Universal Nature & Structures: Segments trees, architecture, monuments, pets, and objects."
+                                "Universal Nature & Structures: High-frequency edge and chromatic segmentation for scenery, monuments, pets, and objects."
                         },
                         fontSize = 11.sp,
                         color = Color.LightGray
                     )
                 }
             }
-        }
-
-        // 3. Clock Z-Depth / Subject Layering Control
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Clock Z-Depth Layering", fontSize = 12.sp, color = Color.Gray)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = clockBehindAllSubjects,
-                    onClick = { clockBehindAllSubjects = true },
-                    label = { Text("Behind All (Group)", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = !clockBehindAllSubjects,
-                    onClick = { clockBehindAllSubjects = false },
-                    label = { Text("Between Subjects", fontSize = 11.sp) }
-                )
-            }
-            Text(
-                text = if (clockBehindAllSubjects) {
-                    "Behind All: Pushes the clock behind every person in the photo (including distant and waving group members). Best for group photos."
-                } else {
-                    "Between Subjects: Weaves the clock between foreground and background subjects for depth layering."
-                },
-                fontSize = 11.sp,
-                color = Color.LightGray
-            )
         }
 
         // 3. Granular AI Tuning Controls (with detailed descriptions)
@@ -837,7 +817,6 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     maskExpansion = maskExpansion,
                     inpaintRadius = inpaintRadius,
                     modelType = selectedModel,
-                    clockBehindAllSubjects = clockBehindAllSubjects,
                     cutoutContrast = cutoutContrast
                 )
             },
