@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import kotlin.math.abs
 import kotlin.math.max
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -674,7 +675,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             // Section A: Standalone AI Models
             Text("Standalone AI Models", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0B0C0))
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 AiModelChoice.entries.forEach { model ->
@@ -722,7 +723,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             Spacer(modifier = Modifier.height(2.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 AiPipelineChoice.entries.forEach { pipeline ->

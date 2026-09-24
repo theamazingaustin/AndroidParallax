@@ -99,4 +99,16 @@ class CoreEnginesTest {
         val sample = InpaintingEngine.sampleMaskBilinear(mask, w, h, 0.5f, 0.5f)
         assertEquals(0.5f, sample, 0.01f)
     }
+
+    @Test
+    fun testFromIdBackwardCompatibility() {
+        assertEquals(AiModelChoice.SELFIE_MULTICLASS, AiModelChoice.fromId("MOD_NET"))
+        assertEquals(AiModelChoice.DEEPLAB_V3, AiModelChoice.fromId("BIREF_NET"))
+        assertEquals(AiModelChoice.DEEPLAB_V3, AiModelChoice.fromId("MOBILE_SAM"))
+        assertEquals(AiModelChoice.DEPTH_ANYTHING_V2, AiModelChoice.fromId("DEPTH_ANYTHING_V2"))
+
+        assertEquals(AiPipelineChoice.DEPTH_MATTING_FUSION, AiPipelineChoice.fromId("DUAL_MODEL_HYBRID"))
+        assertEquals(AiPipelineChoice.MULTI_SCALE_ZOOM, AiPipelineChoice.fromId("MULTI_SCALE_TILING"))
+        assertEquals(AiPipelineChoice.DEPTH_MATTING_FUSION, AiPipelineChoice.fromId("DEPTH_MATTING_FUSION"))
+    }
 }

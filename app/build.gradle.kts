@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.depthpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.14.0"
+        versionCode = 15
+        versionName = "0.15.0"
     }
 
     signingConfigs {
@@ -55,6 +55,9 @@ android {
       resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
       }
+      jniLibs {
+        pickFirsts += "**/*.so"
+      }
     }
 }
 
@@ -84,6 +87,9 @@ dependencies {
 
   // On-Device ML
   implementation(libs.mediapipe.tasks.vision)
+  implementation("org.tensorflow:tensorflow-lite:2.16.1")
+  implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+  implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests

@@ -42,8 +42,9 @@ data class ModelTuningProfile(
 )
 
 /**
- * Curated list of non-dominated, commercially permissive AI models.
+ * Curated list of genuine, on-device AI models.
  * Strictly Apache 2.0 and MIT licenses (100% legal for paid/commercial apps).
+ * Every entry points to an authentic neural network weight file in assets.
  */
 enum class AiModelChoice(
     val id: String,
@@ -56,39 +57,24 @@ enum class AiModelChoice(
 ) {
     DEPTH_ANYTHING_V2(
         id = "DEPTH_ANYTHING_V2",
-        modelName = "Depth Anything V2 Small",
+        modelName = "Depth Anything V2 Small (ViT-Small)",
         shortLabel = "Depth Anything V2",
-        bestAt = "Universal 3D scene geometry & continuous metric depth across landscapes, redwood forests, rooms, architecture, objects, and people.",
+        bestAt = "Universal continuous 3D metric depth geometry; redwoods, architecture, landscapes, nature, objects, and depth-based multi-subject extraction.",
         license = "Apache 2.0 (100% Commercial Cleared)",
-        assetPath = "models/deeplab_v3.tflite",
+        assetPath = "models/depth_anything_v2_small.tflite",
         tuningProfile = ModelTuningProfile(
-            sensitivity = SliderSetting(min = 0.20f, max = 0.80f, default = 0.45f),
+            sensitivity = SliderSetting(min = 0.20f, max = 0.85f, default = 0.50f),
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
-            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.80f),
+            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
             edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
+            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 20f, steps = 16)
         )
     ),
-    BIREF_NET(
-        id = "BIREF_NET",
-        modelName = "BiRefNet (Bilateral Reference)",
-        shortLabel = "BiRefNet",
-        bestAt = "Group photos, full bodies & objects; razor-sharp silhouettes with high-contrast edge snapping.",
-        license = "MIT License (100% Commercial Cleared)",
-        assetPath = "models/deeplab_v3.tflite",
-        tuningProfile = ModelTuningProfile(
-            sensitivity = SliderSetting(min = 0.25f, max = 0.85f, default = 0.48f),
-            maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
-            layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.95f),
-            edgeSoftness = SliderSetting(min = 1f, max = 12f, default = 3f, steps = 11),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 22f, steps = 16)
-        )
-    ),
-    MOD_NET(
-        id = "MOD_NET",
-        modelName = "MODNet Portrait Matting",
-        shortLabel = "MODNet",
-        bestAt = "Portrait & selfie alpha matting; sub-pixel hair strands, fine skin tones, and soft clothing transitions.",
+    SELFIE_MULTICLASS(
+        id = "SELFIE_MULTICLASS",
+        modelName = "MediaPipe Selfie Multiclass",
+        shortLabel = "Portrait & Hair Matting",
+        bestAt = "High-precision portrait matting; sub-pixel hair strands, fine skin tones, and soft clothing transitions on people.",
         license = "Apache 2.0 (100% Commercial Cleared)",
         assetPath = "models/selfie_multiclass.tflite",
         tuningProfile = ModelTuningProfile(
@@ -99,25 +85,46 @@ enum class AiModelChoice(
             inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
         )
     ),
-    MOBILE_SAM(
-        id = "MOBILE_SAM",
-        modelName = "MobileSAM (Segment Anything)",
-        shortLabel = "MobileSAM",
-        bestAt = "Multi-subject & object segmentation (separates and isolates multiple people, pets, vehicles, or items).",
+    DEEPLAB_V3(
+        id = "DEEPLAB_V3",
+        modelName = "DeepLab v3 MobileNet",
+        shortLabel = "DeepLab (Multi-Subject)",
+        bestAt = "Multi-subject and object semantic segmentation across 21 discrete categories (people, pets, vehicles, objects).",
         license = "Apache 2.0 (100% Commercial Cleared)",
         assetPath = "models/deeplab_v3.tflite",
+        tuningProfile = ModelTuningProfile(
+            sensitivity = SliderSetting(min = 0.25f, max = 0.85f, default = 0.48f),
+            maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
+            layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.95f),
+            edgeSoftness = SliderSetting(min = 1f, max = 12f, default = 4f, steps = 11),
+            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 22f, steps = 16)
+        )
+    ),
+    FAST_SELFIE(
+        id = "FAST_SELFIE",
+        modelName = "MediaPipe Fast Selfie",
+        shortLabel = "Fast Selfie",
+        bestAt = "Ultra-fast portrait cutout with minimal battery and compute overhead.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
+        assetPath = "models/selfie_segmenter.tflite",
         tuningProfile = ModelTuningProfile(
             sensitivity = SliderSetting(min = 0.25f, max = 0.85f, default = 0.50f),
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
             layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.90f),
             edgeSoftness = SliderSetting(min = 1f, max = 14f, default = 5f, steps = 13),
-            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 20f, steps = 16)
+            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
         )
     );
 
     companion object {
         fun fromId(id: String): AiModelChoice =
-            entries.find { it.id.equals(id, ignoreCase = true) } ?: DEPTH_ANYTHING_V2
+            entries.find { it.id.equals(id, ignoreCase = true) }
+                ?: when (id.uppercase()) {
+                    "MOD_NET" -> SELFIE_MULTICLASS
+                    "BIREF_NET", "MOBILE_SAM" -> DEEPLAB_V3
+                    "SELFIE_FAST" -> FAST_SELFIE
+                    else -> DEPTH_ANYTHING_V2
+                }
     }
 }
 
@@ -132,12 +139,26 @@ enum class AiPipelineChoice(
     val license: String,
     val tuningProfile: ModelTuningProfile
 ) {
-    DUAL_MODEL_HYBRID(
-        id = "DUAL_MODEL_HYBRID",
-        pipelineName = "Dual-Model Hybrid (DeepLab + Multiclass Fusion)",
-        shortLabel = "Depth + Matting Fusion",
-        bestAt = "Fuses DeepLab group context with Multiclass hair/clothing details. Captures full bodies with zero hollowing.",
-        license = "Apache 2.0 & MIT Combined Pipeline",
+    DEPTH_MATTING_FUSION(
+        id = "DEPTH_MATTING_FUSION",
+        pipelineName = "Depth Anything V2 + Hair Matting Fusion",
+        shortLabel = "Depth + Matting (Recommended)",
+        bestAt = "The ultimate flagship pipeline: Depth Anything V2 captures the full body & 3D geometry (zero hollowing) while Multiclass refines sub-pixel hair strands.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
+        tuningProfile = ModelTuningProfile(
+            sensitivity = SliderSetting(min = 0.20f, max = 0.85f, default = 0.48f),
+            maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
+            layerFlatness = SliderSetting(min = 0.60f, max = 1.0f, default = 0.92f),
+            edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 5f, steps = 15),
+            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 24f, steps = 16)
+        )
+    ),
+    SEMANTIC_PORTRAIT_HYBRID(
+        id = "SEMANTIC_PORTRAIT_HYBRID",
+        pipelineName = "DeepLab + Multiclass Hybrid Fusion",
+        shortLabel = "DeepLab + Portrait Fusion",
+        bestAt = "Fuses DeepLab group/pet/object context with Multiclass hair & clothing details. Preserves full bodies with zero hollowing.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
         tuningProfile = ModelTuningProfile(
             sensitivity = SliderSetting(min = 0.20f, max = 0.80f, default = 0.42f),
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 1f, steps = 20),
@@ -146,12 +167,12 @@ enum class AiPipelineChoice(
             inpaintFill = SliderSetting(min = 4f, max = 36f, default = 24f, steps = 16)
         )
     ),
-    MULTI_SCALE_TILING(
-        id = "MULTI_SCALE_TILING",
-        pipelineName = "Multi-Scale Tiling & Local Crop Refinement",
-        shortLabel = "Multi-Scale Tiling",
-        bestAt = "Runs a global scene context pass plus high-resolution zoomed crop passes on subject boundaries for desktop-grade silhouette precision.",
-        license = "Apache 2.0 & MIT Combined Pipeline",
+    MULTI_SCALE_ZOOM(
+        id = "MULTI_SCALE_ZOOM",
+        pipelineName = "Multi-Scale Zoom Tiling",
+        shortLabel = "Multi-Scale Zoom",
+        bestAt = "Runs a global scene context pass plus high-resolution zoomed crops on subject boundaries for desktop-grade edge precision.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
         tuningProfile = ModelTuningProfile(
             sensitivity = SliderSetting(min = 0.25f, max = 0.80f, default = 0.45f),
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
@@ -159,11 +180,30 @@ enum class AiPipelineChoice(
             edgeSoftness = SliderSetting(min = 1f, max = 14f, default = 4f, steps = 13),
             inpaintFill = SliderSetting(min = 4f, max = 36f, default = 22f, steps = 16)
         )
+    ),
+    PURE_DEPTH_3D(
+        id = "PURE_DEPTH_3D",
+        pipelineName = "Pure Depth Anything V2 3D Geometry",
+        shortLabel = "Pure 3D Depth",
+        bestAt = "Pure continuous 3D relief mesh without 2D cutout layers. Ideal for landscapes, redwood forests, architecture, and nature wallpapers.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
+        tuningProfile = ModelTuningProfile(
+            sensitivity = SliderSetting(min = 0.20f, max = 0.90f, default = 0.50f),
+            maskMargin = SliderSetting(min = -5f, max = 5f, default = 0f, steps = 10),
+            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.80f),
+            edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
+            inpaintFill = SliderSetting(min = 4f, max = 36f, default = 18f, steps = 16)
+        )
     );
 
     companion object {
         fun fromId(id: String): AiPipelineChoice =
-            entries.find { it.id.equals(id, ignoreCase = true) } ?: DUAL_MODEL_HYBRID
+            entries.find { it.id.equals(id, ignoreCase = true) }
+                ?: when (id.uppercase()) {
+                    "DUAL_MODEL_HYBRID" -> DEPTH_MATTING_FUSION
+                    "MULTI_SCALE_TILING" -> MULTI_SCALE_ZOOM
+                    else -> DEPTH_MATTING_FUSION
+                }
     }
 }
 
@@ -192,21 +232,23 @@ data class SegmentationResult(
  */
 class SegmentationEngine(private val context: Context) {
 
-    private var primarySegmenter: ImageSegmenter? = null
-    private var secondarySegmenter: ImageSegmenter? = null
+    private var deepLabSegmenter: ImageSegmenter? = null
+    private var multiclassSegmenter: ImageSegmenter? = null
+    private var fastSelfieSegmenter: ImageSegmenter? = null
 
     var currentProcessingMode: ProcessingMode = ProcessingMode.PIPELINE
         private set
     var currentModelChoice: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2
         private set
-    var currentPipelineChoice: AiPipelineChoice = AiPipelineChoice.DUAL_MODEL_HYBRID
+    var currentPipelineChoice: AiPipelineChoice = AiPipelineChoice.DEPTH_MATTING_FUSION
         private set
 
     // Backwards-compatible accessor
     val currentModelType: AiModelChoice get() = currentModelChoice
 
     init {
-        initSegmenters(currentModelChoice)
+        // Initialize Depth Anything V2 on GPU/NPU
+        DepthAnythingEngine.initialize(context)
     }
 
     fun setProcessingMode(mode: ProcessingMode) {
@@ -215,19 +257,12 @@ class SegmentationEngine(private val context: Context) {
 
     fun setModelChoice(model: AiModelChoice) {
         currentProcessingMode = ProcessingMode.SINGLE_MODEL
-        if (currentModelChoice != model || primarySegmenter == null) {
-            currentModelChoice = model
-            initSegmenters(model)
-        }
+        currentModelChoice = model
     }
 
     fun setPipelineChoice(pipeline: AiPipelineChoice) {
         currentProcessingMode = ProcessingMode.PIPELINE
         currentPipelineChoice = pipeline
-        // Ensure both primary and secondary models are initialized for hybrid pipelines
-        if (primarySegmenter == null || secondarySegmenter == null) {
-            initSegmenters(currentModelChoice)
-        }
     }
 
     // Compatibility method
@@ -235,15 +270,25 @@ class SegmentationEngine(private val context: Context) {
         setModelChoice(type)
     }
 
-    private fun initSegmenters(model: AiModelChoice) {
-        close()
-        primarySegmenter = createSegmenter(model.assetPath)
-        // Secondary segmenter handles multiclass portrait / fine detail in dual-hybrid pipelines
-        val secondaryAsset = when (model) {
-            AiModelChoice.MOD_NET -> "models/deeplab_v3.tflite"
-            else -> "models/selfie_multiclass.tflite"
+    private fun getDeepLabSegmenter(): ImageSegmenter? {
+        if (deepLabSegmenter == null) {
+            deepLabSegmenter = createSegmenter("models/deeplab_v3.tflite")
         }
-        secondarySegmenter = createSegmenter(secondaryAsset)
+        return deepLabSegmenter
+    }
+
+    private fun getMulticlassSegmenter(): ImageSegmenter? {
+        if (multiclassSegmenter == null) {
+            multiclassSegmenter = createSegmenter("models/selfie_multiclass.tflite")
+        }
+        return multiclassSegmenter
+    }
+
+    private fun getFastSelfieSegmenter(): ImageSegmenter? {
+        if (fastSelfieSegmenter == null) {
+            fastSelfieSegmenter = createSegmenter("models/selfie_segmenter.tflite")
+        }
+        return fastSelfieSegmenter
     }
 
     private fun createSegmenter(assetPath: String): ImageSegmenter? {
@@ -260,7 +305,7 @@ class SegmentationEngine(private val context: Context) {
                 .build()
 
             val seg = ImageSegmenter.createFromOptions(context, options)
-            AppLogger.i("SegmentationEngine", "Initialized $assetPath on GPU/NPU")
+            AppLogger.i("SegmentationEngine", "Initialized $assetPath on GPU")
             seg
         } catch (e: Exception) {
             AppLogger.w("SegmentationEngine", "GPU init failed for $assetPath (${e.message}), falling back to CPU")
@@ -287,7 +332,6 @@ class SegmentationEngine(private val context: Context) {
     /**
      * Morphologically dilates (expansion > 0) or erodes (expansion < 0) [rawMask]
      * by [expansionPixels] pixels using a fast separable min/max 2D filter.
-     * Prevents low-confidence noise from bleeding into the mask while cleanly growing/shrinking silhouettes.
      */
     fun morphologicallyFilterMask(
         rawMask: FloatArray,
@@ -302,30 +346,38 @@ class SegmentationEngine(private val context: Context) {
         val temp = FloatArray(w * h)
         val result = FloatArray(w * h)
 
-        // Horizontal 1D pass
+        // Pass 1: Horizontal min/max
         for (y in 0 until h) {
             val row = y * w
             for (x in 0 until w) {
-                val minX = max(0, x - radius)
-                val maxX = min(w - 1, x + radius)
-                var extreme = rawMask[row + minX]
-                for (nx in (minX + 1)..maxX) {
+                var extreme = rawMask[row + x]
+                val xStart = max(0, x - radius)
+                val xEnd = min(w - 1, x + radius)
+                for (nx in xStart..xEnd) {
                     val v = rawMask[row + nx]
-                    extreme = if (isDilation) max(extreme, v) else min(extreme, v)
+                    if (isDilation) {
+                        if (v > extreme) extreme = v
+                    } else {
+                        if (v < extreme) extreme = v
+                    }
                 }
                 temp[row + x] = extreme
             }
         }
 
-        // Vertical 1D pass
+        // Pass 2: Vertical min/max
         for (x in 0 until w) {
             for (y in 0 until h) {
-                val minY = max(0, y - radius)
-                val maxY = min(h - 1, y + radius)
-                var extreme = temp[minY * w + x]
-                for (ny in (minY + 1)..maxY) {
+                var extreme = temp[y * w + x]
+                val yStart = max(0, y - radius)
+                val yEnd = min(h - 1, y + radius)
+                for (ny in yStart..yEnd) {
                     val v = temp[ny * w + x]
-                    extreme = if (isDilation) max(extreme, v) else min(extreme, v)
+                    if (isDilation) {
+                        if (v > extreme) extreme = v
+                    } else {
+                        if (v < extreme) extreme = v
+                    }
                 }
                 result[y * w + x] = extreme
             }
@@ -335,8 +387,9 @@ class SegmentationEngine(private val context: Context) {
     }
 
     /**
-     * Processes [sourceBmp] completely on-device.
-     * Computes high-resolution alpha cutout, inpainted background, and continuous depth map.
+     * Main on-device inference entrypoint.
+     * Executes the requested standalone AI model or multi-model pipeline,
+     * applies 2D morphological margin filtering, and enforces Trimap-Constrained Guided Matting.
      */
     fun processImage(
         sourceBmp: Bitmap,
@@ -379,31 +432,44 @@ class SegmentationEngine(private val context: Context) {
 
         AppLogger.i("SegmentationEngine", "processImage: ${w}x${h}, mode=$processingMode, model=${modelChoice.modelName}, pipeline=${pipelineChoice.pipelineName}")
 
-        // Execute selected processing architecture
+        // 1. ALWAYS run Depth Anything V2 for real 3D scene geometry & continuous metric depth!
+        val depthResult = DepthAnythingEngine.estimateDepth(
+            context = context,
+            inputBitmap = inferenceBmp,
+            foregroundSensitivity = threshold
+        )
+
+        // 2. Execute selected AI processing architecture for foreground extraction
         var (rawMask, maskW, maskH) = when (processingMode) {
             ProcessingMode.PIPELINE -> {
                 when (pipelineChoice) {
-                    AiPipelineChoice.DUAL_MODEL_HYBRID -> {
-                        executeDualModelHybridPipeline(inferenceBmp)
+                    AiPipelineChoice.DEPTH_MATTING_FUSION -> {
+                        executeDepthMattingFusionPipeline(inferenceBmp, depthResult)
                     }
-                    AiPipelineChoice.MULTI_SCALE_TILING -> {
-                        executeMultiScaleTilingPipeline(inferenceBmp)
+                    AiPipelineChoice.SEMANTIC_PORTRAIT_HYBRID -> {
+                        executeSemanticPortraitHybridPipeline(inferenceBmp)
+                    }
+                    AiPipelineChoice.MULTI_SCALE_ZOOM -> {
+                        executeMultiScaleZoomPipeline(inferenceBmp)
+                    }
+                    AiPipelineChoice.PURE_DEPTH_3D -> {
+                        executePureDepthMask(depthResult, inferenceBmp)
                     }
                 }
             }
             ProcessingMode.SINGLE_MODEL -> {
                 when (modelChoice) {
                     AiModelChoice.DEPTH_ANYTHING_V2 -> {
-                        executeDepthAnythingV2Single(inferenceBmp)
+                        executePureDepthMask(depthResult, inferenceBmp)
                     }
-                    AiModelChoice.BIREF_NET -> {
-                        executeBiRefNetSingle(inferenceBmp)
+                    AiModelChoice.SELFIE_MULTICLASS -> {
+                        runInference(getMulticlassSegmenter(), inferenceBmp)
                     }
-                    AiModelChoice.MOD_NET -> {
-                        executeModNetSingle(inferenceBmp)
+                    AiModelChoice.DEEPLAB_V3 -> {
+                        runInference(getDeepLabSegmenter(), inferenceBmp)
                     }
-                    AiModelChoice.MOBILE_SAM -> {
-                        executeMobileSamSingle(inferenceBmp)
+                    AiModelChoice.FAST_SELFIE -> {
+                        runInference(getFastSelfieSegmenter(), inferenceBmp)
                     }
                 }
             }
@@ -418,32 +484,36 @@ class SegmentationEngine(private val context: Context) {
         var fgRatio = fgCount.toFloat() / totalPixels
 
         // If person ML model produced zero or near-zero subject (nature, architecture, object photo),
-        // automatically fallback to Universal Saliency Mask!
-        if (fgRatio < 0.03f) {
-            AppLogger.i("SegmentationEngine", "Low subject confidence (fgRatio=$fgRatio). Auto-switching to Universal Saliency for nature/structures.")
+        // fallback to Depth Anything V2 depth mask or Universal Saliency!
+        if (fgRatio < 0.03f && depthResult != null) {
+            AppLogger.i("SegmentationEngine", "Low subject confidence ($fgRatio). Using Depth Anything V2 foreground mask.")
+            rawMask = depthResult.foregroundConfidenceMask
+            maskW = depthResult.depthWidth
+            maskH = depthResult.depthHeight
+            fgCount = 0
+            for (i in rawMask.indices) {
+                if (rawMask[i] >= threshold) fgCount++
+            }
+            fgRatio = fgCount.toFloat() / rawMask.size
+        } else if (fgRatio < 0.03f) {
+            AppLogger.i("SegmentationEngine", "Falling back to Universal Saliency.")
             val universal = computeUniversalSaliencyMask(inferenceBmp)
             rawMask = universal.first
             maskW = universal.second
             maskH = universal.third
-            fgCount = 0
-            val newTotal = maskW * maskH
-            for (i in 0 until newTotal) {
-                if (rawMask[i] >= threshold) fgCount++
-            }
-            fgRatio = fgCount.toFloat() / newTotal
         }
 
         val isPortrait = fgRatio in 0.05f..0.85f
         AppLogger.i("SegmentationEngine", "Mask computed: ${maskW}x${maskH}, fgRatio=${"%.3f".format(fgRatio)}, isPortrait=$isPortrait")
 
-        // 1. True Separable 2D Morphological Mask Expansion/Choke (Expands/contracts physical silhouette border)
+        // 3. True Separable 2D Morphological Mask Expansion/Choke
         val adjustedMask = if (maskExpansion != 0) {
             morphologicallyFilterMask(rawMask, maskW, maskH, maskExpansion)
         } else {
             rawMask
         }
 
-        // 2. Compute Guided Filter Coefficients for Sub-Pixel Edge Snapping
+        // 4. Compute Guided Filter Coefficients for Sub-Pixel Edge Snapping
         val guidedCoeff = GuidedMattingFilter.computeCoefficients(
             guideBmp = safeBmp,
             rawMask = adjustedMask,
@@ -453,9 +523,9 @@ class SegmentationEngine(private val context: Context) {
             eps = 0.005f
         )
 
-        // 3. Trimap-Constrained Cutout Generation
+        // 5. Trimap-Constrained Cutout Generation
         // Core interior is locked to 255 (SOLID: zero hollowing of hoodies, shirts, bodies, skin)
-        // Exterior is locked to 0 (CLEAN: zero background bleed or clock fuzz)
+        // Exterior is locked to 0 (CLEAN: zero background bleed)
         // ONLY the thin boundary transition zone is refined by high-res guided filter & Layer Flatness contrast
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
@@ -509,42 +579,31 @@ class SegmentationEngine(private val context: Context) {
         }
         cutoutBmp.setPixels(cutoutPixels, 0, w, 0, 0, w, h)
 
-        // 4. Generate Continuous 3D Depth Map with Consistent Foreground Planes
-        val depthBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val depthPixels = IntArray(w * h)
-        for (y in 0 until h) {
-            val v = y * invH
-            val rowOffset = y * w
-            for (x in 0 until w) {
-                val u = x * invW
-                val c = sourcePixels[rowOffset + x]
-                val neuralConf = InpaintingEngine.sampleMaskBilinear(adjustedMask, maskW, maskH, u, v)
-
-                val shapedConf: Float = when {
-                    neuralConf >= solidFgThresh -> 1.0f
-                    neuralConf <= solidBgThresh -> 0.0f
-                    else -> {
-                        val r = (c shr 16 and 0xFF) / 255f
-                        val g = (c shr 8 and 0xFF) / 255f
-                        val b = (c and 0xFF) / 255f
-                        val highResLum = 0.299f * r + 0.587f * g + 0.114f * b
-                        val guidedAlpha = GuidedMattingFilter.sampleGuidedAlpha(guidedCoeff, u, v, highResLum)
-                        val bandNorm = ((neuralConf - solidBgThresh) / bandDenom).coerceIn(0f, 1f)
-                        val edgeVal = (guidedAlpha * 0.70f + bandNorm * 0.30f).coerceIn(0f, 1f)
-                        val centered = (edgeVal - 0.5f) * contrastFactor + 0.5f
-                        centered.coerceIn(0f, 1f)
-                    }
+        // 6. Generate Continuous 3D Depth Map with Depth Anything V2
+        val depthBmp = if (depthResult != null) {
+            // Real physical 3D scene geometry from Depth Anything V2!
+            Bitmap.createScaledBitmap(depthResult.depthBitmap, w, h, true)
+        } else {
+            // Graceful fallback if model initialization failed
+            val fallbackBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val depthPixels = IntArray(w * h)
+            for (y in 0 until h) {
+                val v = y * invH
+                val rowOffset = y * w
+                for (x in 0 until w) {
+                    val u = x * invW
+                    val neuralConf = InpaintingEngine.sampleMaskBilinear(adjustedMask, maskW, maskH, u, v)
+                    val bgGradient = (y.toFloat() / h) * 0.35f
+                    val depthVal = (neuralConf * 0.85f + bgGradient * (1f - neuralConf)).coerceIn(0f, 1f)
+                    val gray = (depthVal * 255).toInt()
+                    depthPixels[rowOffset + x] = Color.rgb(gray, gray, gray)
                 }
-
-                val bgGradient = (y.toFloat() / h) * 0.35f
-                val depthVal = (shapedConf * 0.85f + bgGradient * (1f - shapedConf)).coerceIn(0f, 1f)
-                val gray = (depthVal * 255).toInt()
-                depthPixels[rowOffset + x] = Color.rgb(gray, gray, gray)
             }
+            fallbackBmp.setPixels(depthPixels, 0, w, 0, 0, w, h)
+            fallbackBmp
         }
-        depthBmp.setPixels(depthPixels, 0, w, 0, 0, w, h)
 
-        // 5. Inpainted Background Plate (Large dilation ensures subjects are 100% erased under the cutout)
+        // 7. Inpainted Background Plate (Large dilation ensures subjects are 100% erased under the cutout)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = adjustedMask,
@@ -567,13 +626,57 @@ class SegmentationEngine(private val context: Context) {
     }
 
     /**
-     * Dual-Model Hybrid Pipeline:
+     * Flagship Pipeline: Depth Anything V2 + MediaPipe Selfie Multiclass Fusion.
+     * Uses Depth Anything V2 for whole-body geometry and zero hollowing,
+     * fused with Multiclass for sub-pixel hair strands and skin tone transitions.
+     */
+    private fun executeDepthMattingFusionPipeline(
+        bitmap: Bitmap,
+        depthResult: DepthAnythingEngine.DepthResult?
+    ): Triple<FloatArray, Int, Int> {
+        AppLogger.i("SegmentationEngine", "Executing Flagship: Depth Anything V2 + Multiclass Fusion")
+        val multiclass = runInference(getMulticlassSegmenter(), bitmap)
+
+        if (depthResult == null) {
+            return multiclass
+        }
+
+        val dMask = depthResult.foregroundConfidenceMask
+        val dW = depthResult.depthWidth
+        val dH = depthResult.depthHeight
+
+        val mW = multiclass.second
+        val mH = multiclass.third
+        val mMask = multiclass.first
+
+        val outW = max(dW, mW)
+        val outH = max(dH, mH)
+        val fused = FloatArray(outW * outH)
+        val invW = 1.0f / max(1, outW - 1)
+        val invH = 1.0f / max(1, outH - 1)
+
+        for (y in 0 until outH) {
+            val v = y * invH
+            val rowOffset = y * outW
+            for (x in 0 until outW) {
+                val u = x * invW
+                val dVal = InpaintingEngine.sampleMaskBilinear(dMask, dW, dH, u, v)
+                val mVal = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
+                // Depth model anchors whole torso & legs; Multiclass anchors fine hair
+                fused[rowOffset + x] = max(dVal, mVal)
+            }
+        }
+        return Triple(fused, outW, outH)
+    }
+
+    /**
+     * Semantic + Portrait Hybrid:
      * Fuses DeepLabV3 (group context, bodies, legs, objects) with Selfie Multiclass (hair, clothing details).
      */
-    private fun executeDualModelHybridPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing Dual-Model Hybrid: DeepLabV3 + Selfie Multiclass Fusion")
-        val deepLab = runInference(primarySegmenter, bitmap)
-        val multiclass = runInference(secondarySegmenter ?: primarySegmenter, bitmap)
+    private fun executeSemanticPortraitHybridPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
+        AppLogger.i("SegmentationEngine", "Executing Semantic Portrait Hybrid: DeepLabV3 + Selfie Multiclass")
+        val deepLab = runInference(getDeepLabSegmenter(), bitmap)
+        val multiclass = runInference(getMulticlassSegmenter(), bitmap)
 
         val outW = max(deepLab.second, multiclass.second)
         val outH = max(deepLab.third, multiclass.third)
@@ -595,18 +698,16 @@ class SegmentationEngine(private val context: Context) {
     }
 
     /**
-     * Multi-Scale Tiling Pipeline:
+     * Multi-Scale Zoom Tiling Pipeline:
      * Global context pass + high-resolution zoomed crops on subject boundaries for sub-pixel precision.
      */
-    private fun executeMultiScaleTilingPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing Multi-Scale Tiling & Local Crop Refinement Pipeline")
-        // Pass 1: Global inference
-        val global = runInference(primarySegmenter, bitmap)
+    private fun executeMultiScaleZoomPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
+        AppLogger.i("SegmentationEngine", "Executing Multi-Scale Zoom Tiling Pipeline")
+        val global = runInference(getDeepLabSegmenter(), bitmap)
         val gMask = global.first
         val gW = global.second
         val gH = global.third
 
-        // Locate subject bounding box in normalized coordinates
         var minX = gW
         var maxX = 0
         var minY = gH
@@ -627,10 +728,9 @@ class SegmentationEngine(private val context: Context) {
         }
 
         if (fgCount < 100 || minX >= maxX || minY >= maxY) {
-            return global // Fallback to global if no discrete bounding box
+            return global
         }
 
-        // Pass 2: High-Resolution Crop around subject
         val normLeft = (minX.toFloat() / gW).coerceIn(0f, 1f)
         val normTop = (minY.toFloat() / gH).coerceIn(0f, 1f)
         val normRight = (maxX.toFloat() / gW).coerceIn(0f, 1f)
@@ -649,8 +749,7 @@ class SegmentationEngine(private val context: Context) {
 
         if (cropBmp == null) return global
 
-        // Pass 3: High-Res Crop Inference & Splice
-        val localCropResult = runInference(primarySegmenter, cropBmp)
+        val localCropResult = runInference(getDeepLabSegmenter(), cropBmp)
         if (cropBmp != bitmap && !cropBmp.isRecycled) cropBmp.recycle()
 
         val stitched = gMask.copyOf()
@@ -665,7 +764,6 @@ class SegmentationEngine(private val context: Context) {
                 val uLocal = (x - minX).toFloat() / max(1, maxX - minX)
                 val cropConf = InpaintingEngine.sampleMaskBilinear(cMask, cW, cH, uLocal, vLocal)
                 val origConf = stitched[rowOffset + x]
-                // Blend high-res local crop with global confidence
                 stitched[rowOffset + x] = (origConf * 0.35f + cropConf * 0.65f).coerceIn(0f, 1f)
             }
         }
@@ -673,93 +771,14 @@ class SegmentationEngine(private val context: Context) {
         return Triple(stitched, gW, gH)
     }
 
-    private fun executeDepthAnythingV2Single(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing Depth Anything V2 Single Model")
-        val sceneDepth = computeDepthGeometry(bitmap)
-        val deepLab = runInference(primarySegmenter, bitmap)
-        return fuseMasks(sceneDepth, deepLab)
-    }
-
-    private fun executeBiRefNetSingle(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing BiRefNet Single Model with Edge Snapping")
-        val base = runInference(primarySegmenter, bitmap)
-        val sharpened = base.first.copyOf()
-        for (i in sharpened.indices) {
-            val v = sharpened[i]
-            sharpened[i] = if (v >= 0.5f) {
-                1f - 0.5f * Math.pow(2.0 * (1.0 - v), 2.2).toFloat()
-            } else {
-                0.5f * Math.pow(2.0 * v.toDouble(), 2.2).toFloat()
-            }.coerceIn(0f, 1f)
-        }
-        return Triple(sharpened, base.second, base.third)
-    }
-
-    private fun executeModNetSingle(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing MODNet Portrait Matting Single Model")
-        return runInference(secondarySegmenter ?: primarySegmenter, bitmap)
-    }
-
-    private fun executeMobileSamSingle(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        AppLogger.i("SegmentationEngine", "Executing MobileSAM Single Model")
-        return runInference(primarySegmenter, bitmap)
-    }
-
-    /**
-     * Computes 3D Scene Geometry & Monocular Metric Depth field.
-     */
-    private fun computeDepthGeometry(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        val mW = min(320, bitmap.width)
-        val mH = min(320, bitmap.height)
-        val scaled = Bitmap.createScaledBitmap(bitmap, mW, mH, true)
-        val pixels = IntArray(mW * mH)
-        scaled.getPixels(pixels, 0, mW, 0, 0, mW, mH)
-        if (scaled != bitmap && !scaled.isRecycled) scaled.recycle()
-
-        val lum = FloatArray(mW * mH)
-        for (i in 0 until mW * mH) {
-            val c = pixels[i]
-            val r = (c shr 16 and 0xFF) / 255f
-            val g = (c shr 8 and 0xFF) / 255f
-            val b = (c and 0xFF) / 255f
-            lum[i] = 0.299f * r + 0.587f * g + 0.114f * b
-        }
-
-        val depth = FloatArray(mW * mH)
-        for (y in 0 until mH) {
-            val yNorm = y.toFloat() / mH
-            // Ground-plane perspective gradient: foreground objects stand closer
-            val perspectiveField = 0.20f + 0.80f * (yNorm * yNorm)
-            val rowOffset = y * mW
-            for (x in 0 until mW) {
-                val l = lum[rowOffset + x]
-                depth[rowOffset + x] = (perspectiveField * 0.7f + (1f - l) * 0.3f).coerceIn(0f, 1f)
-            }
-        }
-        return Triple(depth, mW, mH)
-    }
-
-    private fun fuseMasks(
-        m1: Triple<FloatArray, Int, Int>,
-        m2: Triple<FloatArray, Int, Int>
+    private fun executePureDepthMask(
+        depthResult: DepthAnythingEngine.DepthResult?,
+        bitmap: Bitmap
     ): Triple<FloatArray, Int, Int> {
-        val outW = max(m1.second, m2.second)
-        val outH = max(m1.third, m2.third)
-        val fused = FloatArray(outW * outH)
-        val invW = 1.0f / max(1, outW - 1)
-        val invH = 1.0f / max(1, outH - 1)
-
-        for (y in 0 until outH) {
-            val v = y * invH
-            val rowOffset = y * outW
-            for (x in 0 until outW) {
-                val u = x * invW
-                val c1 = InpaintingEngine.sampleMaskBilinear(m1.first, m1.second, m1.third, u, v)
-                val c2 = InpaintingEngine.sampleMaskBilinear(m2.first, m2.second, m2.third, u, v)
-                fused[rowOffset + x] = max(c1, c2)
-            }
+        if (depthResult != null) {
+            return Triple(depthResult.foregroundConfidenceMask, depthResult.depthWidth, depthResult.depthHeight)
         }
-        return Triple(fused, outW, outH)
+        return computeUniversalSaliencyMask(bitmap)
     }
 
     private fun runInference(seg: ImageSegmenter?, bitmap: Bitmap): Triple<FloatArray, Int, Int> {
@@ -782,13 +801,15 @@ class SegmentationEngine(private val context: Context) {
                         byteBuffer.asFloatBuffer().get(floatArray)
                         return Triple(floatArray, mW, mH)
                     } else if (maskList.size == 21) {
+                        // DeepLabV3 Pascal VOC / COCO 21 classes:
+                        // 15 = person, 8 = cat, 12 = dog, 3 = bird, 13 = horse, 7 = car, 2 = bicycle
                         val personBuffer = ByteBufferExtractor.extract(maskList[15])
                         personBuffer.order(ByteOrder.nativeOrder())
                         personBuffer.rewind()
                         val pb = personBuffer.asFloatBuffer()
 
-                        val petIndices = intArrayOf(8, 12, 3, 13)
-                        val petBuffers = petIndices.map { idx ->
+                        val salientIndices = intArrayOf(8, 12, 3, 13, 7, 2, 14, 19)
+                        val extraBuffers = salientIndices.filter { it < maskList.size }.map { idx ->
                             val buf = ByteBufferExtractor.extract(maskList[idx])
                             buf.order(ByteOrder.nativeOrder())
                             buf.rewind()
@@ -796,13 +817,14 @@ class SegmentationEngine(private val context: Context) {
                         }
                         for (i in 0 until totalPixels) {
                             var conf = pb.get(i)
-                            for (petBuf in petBuffers) {
-                                conf = max(conf, petBuf.get(i))
+                            for (extraBuf in extraBuffers) {
+                                conf = max(conf, extraBuf.get(i))
                             }
                             floatArray[i] = conf.coerceIn(0f, 1f)
                         }
                         return Triple(floatArray, mW, mH)
                     } else if (maskList.size > 2) {
+                        // MediaPipe Selfie Multiclass: 0 = background, 1..5 = human parts
                         val humanBuffers = (1 until maskList.size).map { c ->
                             val buf = ByteBufferExtractor.extract(maskList[c])
                             buf.order(ByteOrder.nativeOrder())
@@ -926,12 +948,17 @@ class SegmentationEngine(private val context: Context) {
 
     fun close() {
         try {
-            primarySegmenter?.close()
+            deepLabSegmenter?.close()
         } catch (_: Exception) {}
         try {
-            secondarySegmenter?.close()
+            multiclassSegmenter?.close()
         } catch (_: Exception) {}
-        primarySegmenter = null
-        secondarySegmenter = null
+        try {
+            fastSelfieSegmenter?.close()
+        } catch (_: Exception) {}
+        deepLabSegmenter = null
+        multiclassSegmenter = null
+        fastSelfieSegmenter = null
+        DepthAnythingEngine.close()
     }
 }
