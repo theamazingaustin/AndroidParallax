@@ -18,7 +18,7 @@ import kotlin.math.min
  * On-Device Hardware-Accelerated Depth Anything V2 Inference Engine.
  * 
  * Runs the real Depth Anything V2 Small (ViT-Small, 24.8M parameter) Vision Transformer
- * on-device using Qualcomm Adreno GPU or Hexagon NPU (via NNAPI) with CPU fallback.
+ * on-device using Qualcomm Adreno GPU or Hexagon NPU (via NNAPI) with multi-threaded CPU fallback.
  * 
  * Generates continuous, metric 3D scene geometry across nature, redwoods, architecture,
  * mountains, objects, and people, matching the HuggingFace web space.
@@ -106,12 +106,16 @@ object DepthAnythingEngine {
         }
 
         // Tier 3: Multi-threaded CPU with ARM NEON SIMD acceleration
+        initializeCpuOnly(context)
+    }
+
+    private fun initializeCpuOnly(context: Context) {
         try {
+            val modelBuffer = loadModelFile(context, MODEL_ASSET)
             val options = Interpreter.Options().apply {
                 setNumThreads(4)
             }
-            val interp = Interpreter(modelBuffer, options)
-            interpreter = interp
+            interpreter = Interpreter(modelBuffer, options)
             AppLogger.i(TAG, "Depth Anything V2 initialized on CPU (4 threads, NEON SIMD)")
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to initialize Depth Anything V2 on CPU: ${e.message}", e)
@@ -132,16 +136,18 @@ object DepthAnythingEngine {
      * 
      * @param inputBitmap Source photograph (any size and aspect ratio).
      * @param foregroundSensitivity Sensitivity threshold for extracting a foreground silhouette from depth.
+     * @param depthPlaneOffset Focal plane offset for depth slicing (0.0 to 1.0, default 0.50).
      */
     fun estimateDepth(
         context: Context,
         inputBitmap: Bitmap,
-        foregroundSensitivity: Float = 0.45f
+        foregroundSensitivity: Float = 0.50f,
+        depthPlaneOffset: Float = 0.50f
     ): DepthResult? {
         if (interpreter == null) {
             initialize(context)
         }
-        val interp = interpreter ?: run {
+        var interp = interpreter ?: run {
             AppLogger.e(TAG, "Interpreter not initialized.")
             return null
         }
@@ -167,7 +173,6 @@ object DepthAnythingEngine {
             order(ByteOrder.nativeOrder())
         }
 
-        // Channel R
         val inv255 = 1.0f / 255.0f
         val meanR = MEAN[0]
         val stdR = STD[0]
@@ -179,7 +184,6 @@ object DepthAnythingEngine {
             }
         }
 
-        // Channel G
         val meanG = MEAN[1]
         val stdG = STD[1]
         for (y in 0 until inH) {
@@ -190,7 +194,6 @@ object DepthAnythingEngine {
             }
         }
 
-        // Channel B
         val meanB = MEAN[2]
         val stdB = STD[2]
         for (y in 0 until inH) {
@@ -207,13 +210,24 @@ object DepthAnythingEngine {
             order(ByteOrder.nativeOrder())
         }
 
-        // 4. Run hardware-accelerated inference
+        // 4. Run hardware-accelerated inference with automatic CPU fallback
         val startTime = System.currentTimeMillis()
         try {
             interp.run(inputBuffer, outputBuffer)
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Inference execution error: ${e.message}", e)
-            return null
+            AppLogger.w(TAG, "Inference error on hardware delegate (${e.message}), recovering on CPU fallback...")
+            try {
+                close()
+                initializeCpuOnly(context)
+                val cpuInterp = interpreter ?: return null
+                inputBuffer.rewind()
+                outputBuffer.rewind()
+                cpuInterp.run(inputBuffer, outputBuffer)
+                interp = cpuInterp
+            } catch (e2: Exception) {
+                AppLogger.e(TAG, "CPU inference also failed: ${e2.message}", e2)
+                return null
+            }
         }
         val duration = System.currentTimeMillis() - startTime
         AppLogger.i(TAG, "Depth Anything V2 inference finished in ${duration}ms")
@@ -237,21 +251,61 @@ object DepthAnythingEngine {
         val depthPixels = IntArray(totalPixels)
         val fgMask = FloatArray(totalPixels)
 
-        // Depth Anything V2 outputs relative inverse depth (disparity):
-        // Closer objects have higher values, far background has lower values.
-        val fgCutoff = (1.0f - foregroundSensitivity).coerceIn(0.10f, 0.90f)
-
         for (i in 0 until totalPixels) {
             val norm = ((rawDepth[i] - minVal) / range).coerceIn(0f, 1f)
             normalizedDepth[i] = norm
-
             val gray = (norm * 255.0f).toInt().coerceIn(0, 255)
             depthPixels[i] = (0xFF shl 24) or (gray shl 16) or (gray shl 8) or gray
+        }
 
-            // Soft sigmoidal threshold around fgCutoff for clean depth-based subject isolation
-            val diff = (norm - fgCutoff) * 12.0f
-            val sig = (1.0f / (1.0f + Math.exp(-diff.toDouble()))).toFloat()
-            fgMask[i] = sig.coerceIn(0f, 1f)
+        // --- Ground-Plane Relative Elevation Subtraction ---
+        // Prevents horizontal body slicing on sloping ground (beaches, roads, floors)
+        // Computes the 15th-percentile background depth baseline along each horizontal scanline
+        val rowBg = FloatArray(inH)
+        val rowBuffer = FloatArray(inW)
+        for (y in 0 until inH) {
+            val rowOffset = y * inW
+            System.arraycopy(normalizedDepth, rowOffset, rowBuffer, 0, inW)
+            rowBuffer.sort()
+            rowBg[y] = rowBuffer[(inW * 0.15f).toInt()]
+        }
+
+        // Smooth background elevation profile vertically
+        val smoothRowBg = FloatArray(inH)
+        for (y in 0 until inH) {
+            var sum = 0f
+            var count = 0
+            for (dy in -3..3) {
+                val ny = y + dy
+                if (ny in 0 until inH) {
+                    sum += rowBg[ny]
+                    count++
+                }
+            }
+            smoothRowBg[y] = sum / count
+        }
+
+        // Focal plane Z-Cut shift (allows user to tune depth plane distance)
+        val zCutShift = (depthPlaneOffset - 0.50f) * 0.40f
+
+        for (y in 0 until inH) {
+            val rowOffset = y * inW
+            val bgZ = smoothRowBg[y]
+            for (x in 0 until inW) {
+                val idx = rowOffset + x
+                val norm = (normalizedDepth[idx] + zCutShift).coerceIn(0f, 1f)
+
+                // Elevation above local background surface at row y
+                val deltaZ = max(0f, norm - bgZ)
+                // Elevation confidence score: objects standing > 0.14 above ground plane are solid foreground
+                val elevScore = (deltaZ / 0.14f).coerceIn(0f, 1f)
+                // Proximity confidence score: objects near camera
+                val depthScore = norm.coerceIn(0f, 1f)
+
+                // Fused confidence: objects with high elevation or high proximity are confident foreground
+                val conf = max(elevScore, depthScore * 0.72f)
+                fgMask[idx] = conf.coerceIn(0f, 1f)
+            }
         }
 
         val depthBitmap = Bitmap.createBitmap(inW, inH, Bitmap.Config.ARGB_8888)

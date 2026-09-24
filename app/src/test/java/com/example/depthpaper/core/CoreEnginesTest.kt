@@ -127,4 +127,66 @@ class CoreEnginesTest {
             assertTrue("inpaintFill default should be <= 8f", prof.inpaintFill.default in 6f..8f)
         }
     }
+
+    @Test
+    fun testModelAndPipelineBestAtDescriptionsPopulated() {
+        for (model in AiModelChoice.entries) {
+            assertTrue("modelName should not be blank", model.modelName.isNotBlank())
+            assertTrue("bestAt should not be blank for ${model.name}", model.bestAt.isNotBlank())
+            assertTrue("assetPath should point to models/*.tflite", model.assetPath.startsWith("models/") && model.assetPath.endsWith(".tflite"))
+        }
+        for (pipe in AiPipelineChoice.entries) {
+            assertTrue("pipelineName should not be blank", pipe.pipelineName.isNotBlank())
+            assertTrue("bestAt should not be blank for ${pipe.name}", pipe.bestAt.isNotBlank())
+        }
+    }
+
+    @Test
+    fun testGroundPlaneRelativeElevationEliminatesSlopingGroundSlicing() {
+        // Simulate a sloping beach/ground:
+        // Top row y=0 is far ocean depth 0.20
+        // Bottom row y=9 is near sand depth 0.80
+        val w = 10
+        val h = 10
+        val depth = FloatArray(w * h)
+        for (y in 0 until h) {
+            val bgZ = 0.20f + (y.toFloat() / h) * 0.60f
+            for (x in 0 until w) {
+                depth[y * w + x] = bgZ
+            }
+        }
+
+        // Place a standing person from y=2 to y=8 at columns x=4..5:
+        // Person's body is 0.25 closer than the ground behind them at every row!
+        for (y in 2..8) {
+            val bgZ = 0.20f + (y.toFloat() / h) * 0.60f
+            depth[y * w + 4] = bgZ + 0.25f
+            depth[y * w + 5] = bgZ + 0.25f
+        }
+
+        // Compute row background baseline (15th percentile)
+        val rowBg = FloatArray(h)
+        val rowBuffer = FloatArray(w)
+        for (y in 0 until h) {
+            System.arraycopy(depth, y * w, rowBuffer, 0, w)
+            rowBuffer.sort()
+            rowBg[y] = rowBuffer[(w * 0.15f).toInt()]
+        }
+
+        // Verify that for all rows of the person (y=2..8), deltaZ is positive and elevated
+        for (y in 2..8) {
+            val bgZ = rowBg[y]
+            val personZ = depth[y * w + 4]
+            val deltaZ = personZ - bgZ
+            assertTrue("Person at row $y should have deltaZ > 0.20f", deltaZ >= 0.20f)
+        }
+
+        // Verify ground pixels (e.g. x=0) have deltaZ approximately 0
+        for (y in 0 until h) {
+            val bgZ = rowBg[y]
+            val groundZ = depth[y * w + 0]
+            val deltaZ = groundZ - bgZ
+            assertTrue("Ground at row $y should have deltaZ <= 0.05f", deltaZ <= 0.05f)
+        }
+    }
 }

@@ -333,8 +333,8 @@ fun ParallaxViewport(
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
 
-            // 1. Draw Background Photo Plate (Always use inpainted background behind cutout to prevent duplicate subject on parallax tilt)
-            val bgBmp = backgroundBmp ?: sourceBmp
+            // 1. Draw Background Photo Plate
+            val bgBmp = if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
             bgBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),
@@ -415,22 +415,24 @@ fun ParallaxViewport(
                 }
             }
 
-            // Depth order: Clock drawn behind subject cutout
-            if (project.lockScreenConfig.subjectInFrontOfClock) {
+            // Depth order: In Layered 2D, Clock is drawn behind subject cutout
+            if (project.lockScreenConfig.subjectInFrontOfClock && isLayeredMode) {
                 drawClock()
             }
 
-            // 3. Draw Foreground Cutout Plate (drawn at foreground depth offset)
-            cutoutBmp?.let { bmp ->
-                drawImage(
-                    image = bmp.asImageBitmap(),
-                    dstOffset = IntOffset(fgLeft, fgTop),
-                    dstSize = drawSize
-                )
+            // 3. Draw Foreground Cutout Plate (drawn ONLY in Layered 2D mode)
+            if (isLayeredMode) {
+                cutoutBmp.let { bmp ->
+                    drawImage(
+                        image = bmp.asImageBitmap(),
+                        dstOffset = IntOffset(fgLeft, fgTop),
+                        dstSize = drawSize
+                    )
+                }
             }
 
-            // If user turned off "Subject in Front", draw clock on top
-            if (!project.lockScreenConfig.subjectInFrontOfClock) {
+            // In 3D Perspective mode or when Subject in Front is disabled, clock is drawn on top
+            if (!project.lockScreenConfig.subjectInFrontOfClock || !isLayeredMode) {
                 drawClock()
             }
         }

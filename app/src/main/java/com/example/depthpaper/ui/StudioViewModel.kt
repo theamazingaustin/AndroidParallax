@@ -321,6 +321,8 @@ class StudioViewModel(
         processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
         pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
         enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing,
+        depthPlaneOffset: Float = _uiState.value.currentProject.depthPlaneOffset,
+        fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
         debounceMs: Long = 250L
     ) {
         val src = _uiState.value.sourceBitmap ?: return
@@ -332,6 +334,8 @@ class StudioViewModel(
             maskExpansion = maskExpansion,
             inpaintRadius = inpaintRadius,
             cutoutContrast = cutoutContrast,
+            depthPlaneOffset = depthPlaneOffset,
+            fusionBalance = fusionBalance,
             processingMode = processingMode,
             selectedModel = activeModel,
             selectedPipeline = pipelineChoice,
@@ -368,7 +372,9 @@ class StudioViewModel(
                 enablePreprocessing = enablePreprocessing,
                 processingMode = processingMode,
                 modelChoice = activeModel,
-                pipelineChoice = pipelineChoice
+                pipelineChoice = pipelineChoice,
+                depthPlaneOffset = depthPlaneOffset,
+                fusionBalance = fusionBalance
             )
 
             val saved = repository.saveProject(
@@ -400,7 +406,9 @@ class StudioViewModel(
         cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
         processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
         pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
-        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing
+        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing,
+        depthPlaneOffset: Float = _uiState.value.currentProject.depthPlaneOffset,
+        fusionBalance: Float = _uiState.value.currentProject.fusionBalance
     ) {
         onTuningChanged(
             threshold = threshold,
@@ -412,6 +420,8 @@ class StudioViewModel(
             processingMode = processingMode,
             pipelineChoice = pipelineChoice,
             enablePreprocessing = enablePreprocessing,
+            depthPlaneOffset = depthPlaneOffset,
+            fusionBalance = fusionBalance,
             debounceMs = 0L
         )
     }

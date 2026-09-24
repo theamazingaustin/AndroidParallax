@@ -144,6 +144,8 @@ data class WallpaperProject(
     val imagePanX: Float = 0.0f,
     val imagePanY: Float = 0.0f,
     val cutoutContrast: Float = 0.85f,
+    val depthPlaneOffset: Float = 0.50f,
+    val fusionBalance: Float = 0.50f,
     val processingMode: ProcessingMode = ProcessingMode.PIPELINE,
     val selectedModel: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
     val selectedPipeline: AiPipelineChoice = AiPipelineChoice.DEPTH_MATTING_FUSION,
@@ -173,6 +175,8 @@ data class WallpaperProject(
         put("imagePanX", imagePanX.toDouble())
         put("imagePanY", imagePanY.toDouble())
         put("cutoutContrast", cutoutContrast.toDouble())
+        put("depthPlaneOffset", depthPlaneOffset.toDouble())
+        put("fusionBalance", fusionBalance.toDouble())
         put("processingMode", processingMode.name)
         put("selectedModel", selectedModel.name)
         put("selectedPipeline", selectedPipeline.name)
@@ -204,6 +208,8 @@ data class WallpaperProject(
             imagePanX = json.optDouble("imagePanX", 0.0).toFloat(),
             imagePanY = json.optDouble("imagePanY", 0.0).toFloat(),
             cutoutContrast = json.optDouble("cutoutContrast", 0.85).toFloat(),
+            depthPlaneOffset = json.optDouble("depthPlaneOffset", 0.50).toFloat(),
+            fusionBalance = json.optDouble("fusionBalance", 0.50).toFloat(),
             processingMode = runCatching { ProcessingMode.valueOf(json.optString("processingMode", "PIPELINE")) }.getOrDefault(ProcessingMode.PIPELINE),
             selectedModel = runCatching { AiModelChoice.fromId(json.optString("selectedModel", "DEPTH_ANYTHING_V2")) }.getOrDefault(AiModelChoice.DEPTH_ANYTHING_V2),
             selectedPipeline = runCatching { AiPipelineChoice.fromId(json.optString("selectedPipeline", "DEPTH_MATTING_FUSION")) }.getOrDefault(AiPipelineChoice.DEPTH_MATTING_FUSION),

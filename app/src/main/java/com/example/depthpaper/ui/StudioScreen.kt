@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -544,6 +545,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
     var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
+    var depthPlaneOffset by remember(project.id, project.depthPlaneOffset) { mutableFloatStateOf(project.depthPlaneOffset) }
+    var fusionBalance by remember(project.id, project.fusionBalance) { mutableFloatStateOf(project.fusionBalance) }
     var processingMode by remember(project.id, project.processingMode) { mutableStateOf(project.processingMode) }
     var selectedModel by remember(project.id, project.selectedModel) { mutableStateOf(project.selectedModel) }
     var selectedPipeline by remember(project.id, project.selectedPipeline) { mutableStateOf(project.selectedPipeline) }
@@ -658,19 +661,26 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
         }
 
         // 3. AI Processing Engine (Standalone Models & Multi-Model Pipelines)
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("AI Processing Engine", fontSize = 12.sp, color = Color.Gray)
 
             // Section A: Standalone AI Models
-            Text("Standalone AI Models", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFFB0B0C0))
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                AiModelChoice.entries.forEach { model ->
-                    FilterChip(
-                        selected = processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == model,
-                        onClick = {
+            Text("Standalone AI Models", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E5FF))
+
+            AiModelChoice.entries.forEach { model ->
+                val isSelected = processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == model
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) Color(0xFF1B2236) else Color(0xFF161624)
+                    ),
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF28283E)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
                             selectedModel = model
                             processingMode = ProcessingMode.SINGLE_MODEL
                             val prof = model.tuningProfile
@@ -689,36 +699,84 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                 processingMode = ProcessingMode.SINGLE_MODEL,
                                 pipelineChoice = selectedPipeline,
                                 enablePreprocessing = enablePreprocessing,
+                                depthPlaneOffset = depthPlaneOffset,
+                                fusionBalance = fusionBalance,
                                 debounceMs = 0L
                             )
-                        },
-                        label = { Text(model.shortLabel, fontSize = 11.sp) }
-                    )
+                        }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) Color(0xFF00E5FF) else Color(0xFF4A4A65))
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = model.modelName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color.White
+                                )
+                            }
+                            Text(
+                                text = model.shortLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.Gray
+                            )
+                        }
+                        Text(
+                            text = model.bestAt,
+                            fontSize = 11.sp,
+                            color = Color(0xFFB0B0C4),
+                            lineHeight = 14.sp
+                        )
+                    }
                 }
             }
 
             // Section B: Multi-Model High-Precision Pipelines (Visually Separated)
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
                 Text(
                     "  MULTI-MODEL PIPELINES  ",
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF00E5FF)
+                    color = Color(0xFFA29BFE)
                 )
                 Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
             }
             Spacer(modifier = Modifier.height(2.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                AiPipelineChoice.entries.forEach { pipeline ->
-                    FilterChip(
-                        selected = processingMode == ProcessingMode.PIPELINE && selectedPipeline == pipeline,
-                        onClick = {
+            AiPipelineChoice.entries.forEach { pipeline ->
+                val isSelected = processingMode == ProcessingMode.PIPELINE && selectedPipeline == pipeline
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) Color(0xFF221B36) else Color(0xFF161624)
+                    ),
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) Color(0xFFA29BFE) else Color(0xFF28283E)
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
                             selectedPipeline = pipeline
                             processingMode = ProcessingMode.PIPELINE
                             val prof = pipeline.tuningProfile
@@ -737,70 +795,74 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                 processingMode = ProcessingMode.PIPELINE,
                                 pipelineChoice = pipeline,
                                 enablePreprocessing = enablePreprocessing,
+                                depthPlaneOffset = depthPlaneOffset,
+                                fusionBalance = fusionBalance,
                                 debounceMs = 0L
                             )
-                        },
-                        label = { Text(pipeline.shortLabel, fontSize = 11.sp) }
-                    )
-                }
-            }
-
-            // Detailed Model / Pipeline Clarification Card
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B2C)),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            color = if (processingMode == ProcessingMode.PIPELINE) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFFFF9100).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = if (processingMode == ProcessingMode.PIPELINE) "PIPELINE CASCADE" else "STANDALONE MODEL",
-                                color = if (processingMode == ProcessingMode.PIPELINE) Color(0xFF00E5FF) else Color(0xFFFF9100),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) Color(0xFFA29BFE) else Color(0xFF4A4A65))
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = pipeline.pipelineName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color(0xFFA29BFE) else Color.White
+                                )
+                            }
+                            if (pipeline == AiPipelineChoice.DEPTH_MATTING_FUSION) {
+                                Surface(
+                                    color = Color(0xFF00E5FF).copy(alpha = 0.20f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "RECOMMENDED",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF00E5FF),
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
-                            text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.pipelineName else selectedModel.modelName,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-
-                    Text(
-                        text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.bestAt else selectedModel.bestAt,
-                        fontSize = 11.sp,
-                        color = Color.LightGray
-                    )
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (processingMode == ProcessingMode.PIPELINE) selectedPipeline.license else selectedModel.license,
-                            fontSize = 10.sp,
-                            color = Color(0xFF81C784)
+                            text = pipeline.bestAt,
+                            fontSize = 11.sp,
+                            color = Color(0xFFB0B0C4),
+                            lineHeight = 14.sp
                         )
                     }
                 }
             }
         }
 
-        // 4. Granular AI Tuning Controls with Recommended Default Dots & Live Auto-Reprocess
+        // 4. Granular AI Tuning Controls with Model-Specific Dynamic Sliders
+        val isDepthModel = (processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == AiModelChoice.DEPTH_ANYTHING_V2) ||
+                           (processingMode == ProcessingMode.PIPELINE && selectedPipeline == AiPipelineChoice.PURE_DEPTH_3D)
+        val isFusionPipeline = processingMode == ProcessingMode.PIPELINE && selectedPipeline == AiPipelineChoice.DEPTH_MATTING_FUSION
+
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Granular AI Tuning (Auto-Reprocesses Live)", fontSize = 12.sp, color = Color.Gray)
 
-            // Sensitivity / Threshold Slider with Recommended Dot
+            // Sensitivity / Detection Threshold Slider with Recommended Dot
             val sensProf = activeProfile.sensitivity
             TuningSliderWithDefaultIndicator(
                 title = "Sensitivity",
@@ -817,14 +879,104 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
                         enablePreprocessing = enablePreprocessing,
+                        depthPlaneOffset = depthPlaneOffset,
+                        fusionBalance = fusionBalance,
                         debounceMs = 250L
                     )
                 },
                 valueRange = sensProf.min..sensProf.max,
                 recommendedValue = sensProf.default,
                 displayValue = "${(threshold * 100).toInt()}%",
-                description = "Detection confidence threshold. Cyan dot indicates the model's recommended default."
+                description = if (isDepthModel) "Ground-plane relative elevation threshold. Cyan dot indicates the model's recommended default." else "Detection confidence threshold. Cyan dot indicates the model's recommended default."
             )
+
+            // Depth Focal Plane (Z-Cut) Slider: Shown when continuous depth model is active
+            if (isDepthModel) {
+                TuningSliderWithDefaultIndicator(
+                    title = "Depth Focal Plane (Z-Cut)",
+                    value = depthPlaneOffset,
+                    onValueChange = {
+                        depthPlaneOffset = it
+                        viewModel.onTuningChanged(
+                            threshold = threshold,
+                            feathering = feathering,
+                            maskExpansion = maskExpansion,
+                            inpaintRadius = inpaintRadius,
+                            modelType = selectedModel,
+                            cutoutContrast = cutoutContrast,
+                            processingMode = processingMode,
+                            pipelineChoice = selectedPipeline,
+                            enablePreprocessing = enablePreprocessing,
+                            depthPlaneOffset = it,
+                            fusionBalance = fusionBalance,
+                            debounceMs = 250L
+                        )
+                    },
+                    valueRange = 0.10f..0.90f,
+                    recommendedValue = 0.50f,
+                    displayValue = "${(depthPlaneOffset * 100).toInt()}%",
+                    description = "Calibrates the 3D metric camera distance plane for subject separation."
+                )
+            }
+
+            // Depth / Matting Balance Slider: Shown when Flagship Fusion Pipeline is active
+            if (isFusionPipeline) {
+                TuningSliderWithDefaultIndicator(
+                    title = "Depth / Matting Balance",
+                    value = fusionBalance,
+                    onValueChange = {
+                        fusionBalance = it
+                        viewModel.onTuningChanged(
+                            threshold = threshold,
+                            feathering = feathering,
+                            maskExpansion = maskExpansion,
+                            inpaintRadius = inpaintRadius,
+                            modelType = selectedModel,
+                            cutoutContrast = cutoutContrast,
+                            processingMode = processingMode,
+                            pipelineChoice = selectedPipeline,
+                            enablePreprocessing = enablePreprocessing,
+                            depthPlaneOffset = depthPlaneOffset,
+                            fusionBalance = it,
+                            debounceMs = 250L
+                        )
+                    },
+                    valueRange = 0.10f..0.90f,
+                    recommendedValue = 0.50f,
+                    displayValue = "${(fusionBalance * 100).toInt()}%",
+                    description = "Balances 3D depth geometry (left = solid full-body) against neural portrait matting (right = sub-pixel hair details)."
+                )
+            }
+
+            // Layer Flatness (Solid Opacity Contrast) Slider: Hidden for pure depth models, shown for portraits/objects
+            if (!isDepthModel) {
+                val flatProf = activeProfile.layerFlatness
+                TuningSliderWithDefaultIndicator(
+                    title = "Layer Flatness",
+                    value = cutoutContrast,
+                    onValueChange = {
+                        cutoutContrast = it
+                        viewModel.onTuningChanged(
+                            threshold = threshold,
+                            feathering = feathering,
+                            maskExpansion = maskExpansion,
+                            inpaintRadius = inpaintRadius,
+                            modelType = selectedModel,
+                            cutoutContrast = it,
+                            processingMode = processingMode,
+                            pipelineChoice = selectedPipeline,
+                            enablePreprocessing = enablePreprocessing,
+                            depthPlaneOffset = depthPlaneOffset,
+                            fusionBalance = fusionBalance,
+                            debounceMs = 250L
+                        )
+                    },
+                    valueRange = flatProf.min..flatProf.max,
+                    recommendedValue = flatProf.default,
+                    displayValue = "${(cutoutContrast * 100).toInt()}%",
+                    description = "Increases layer opacity contrast to 100% solid. Flattens subjects to eliminate translucency, fuzziness, and ghost text bleed."
+                )
+            }
 
             // Mask Margin (Expansion/Choke) Slider with Recommended Dot
             val marginProf = activeProfile.maskMargin
@@ -843,6 +995,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
                         enablePreprocessing = enablePreprocessing,
+                        depthPlaneOffset = depthPlaneOffset,
+                        fusionBalance = fusionBalance,
                         debounceMs = 250L
                     )
                 },
@@ -851,32 +1005,6 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 steps = marginProf.steps,
                 displayValue = if (maskExpansion > 0) "+${maskExpansion}px" else "${maskExpansion}px",
                 description = "Morphological dilation (+) or erosion (-) to cleanly expand or choke silhouette borders without letting background noise in."
-            )
-
-            // Layer Flatness (Solid Opacity Contrast) Slider with Recommended Dot
-            val flatProf = activeProfile.layerFlatness
-            TuningSliderWithDefaultIndicator(
-                title = "Layer Flatness",
-                value = cutoutContrast,
-                onValueChange = {
-                    cutoutContrast = it
-                    viewModel.onTuningChanged(
-                        threshold = threshold,
-                        feathering = feathering,
-                        maskExpansion = maskExpansion,
-                        inpaintRadius = inpaintRadius,
-                        modelType = selectedModel,
-                        cutoutContrast = it,
-                        processingMode = processingMode,
-                        pipelineChoice = selectedPipeline,
-                        enablePreprocessing = enablePreprocessing,
-                        debounceMs = 250L
-                    )
-                },
-                valueRange = flatProf.min..flatProf.max,
-                recommendedValue = flatProf.default,
-                displayValue = "${(cutoutContrast * 100).toInt()}%",
-                description = "Increases layer opacity contrast to 100% solid. Flattens subjects to eliminate translucency, fuzziness, and ghost text bleed."
             )
 
             // Edge Softness (Feathering) Slider with Recommended Dot
@@ -896,6 +1024,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
                         enablePreprocessing = enablePreprocessing,
+                        depthPlaneOffset = depthPlaneOffset,
+                        fusionBalance = fusionBalance,
                         debounceMs = 250L
                     )
                 },
@@ -923,6 +1053,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
                         enablePreprocessing = enablePreprocessing,
+                        depthPlaneOffset = depthPlaneOffset,
+                        fusionBalance = fusionBalance,
                         debounceMs = 250L
                     )
                 },
@@ -965,7 +1097,9 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     cutoutContrast = cutoutContrast,
                     processingMode = processingMode,
                     pipelineChoice = selectedPipeline,
-                    enablePreprocessing = enablePreprocessing
+                    enablePreprocessing = enablePreprocessing,
+                    depthPlaneOffset = depthPlaneOffset,
+                    fusionBalance = fusionBalance
                 )
             },
             enabled = !state.isProcessing && state.sourceBitmap != null,

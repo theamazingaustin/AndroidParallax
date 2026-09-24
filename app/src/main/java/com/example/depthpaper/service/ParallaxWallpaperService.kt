@@ -293,18 +293,20 @@ class ParallaxWallpaperService : WallpaperService() {
                 }
             }
 
-            // If clock is behind subject, draw clock first
-            if (project.lockScreenConfig.subjectInFrontOfClock) {
+            // In Layered 2D, if clock is behind subject, draw clock first
+            if (project.lockScreenConfig.subjectInFrontOfClock && isLayeredMode) {
                 drawClockAction()
             }
 
-            // 3. Foreground Subject Cutout (drawn at foreground depth offset)
-            fgBitmap?.let { bmp ->
-                canvas.drawBitmap(bmp, null, fgDest, null)
+            // 3. Foreground Subject Cutout (drawn ONLY in Layered 2D mode)
+            if (isLayeredMode) {
+                fgBitmap?.let { bmp ->
+                    canvas.drawBitmap(bmp, null, fgDest, null)
+                }
             }
 
-            // If clock is in front of subject, draw clock after
-            if (!project.lockScreenConfig.subjectInFrontOfClock) {
+            // In 3D Perspective mode or when subject is behind clock, draw clock on top
+            if (!project.lockScreenConfig.subjectInFrontOfClock || !isLayeredMode) {
                 drawClockAction()
             }
         }
