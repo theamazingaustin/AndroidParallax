@@ -28,6 +28,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
+import kotlin.math.abs
+import kotlin.math.max
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -534,23 +537,6 @@ fun ClockAndWallpaperTab(
             )
             Text("${(cfg.clockScale * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
         }
-
-        // 5. Subject in Front Toggle (M3 Switch)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("Subject in Front of Clock", fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
-                Text("Layer clock behind foreground subject", fontSize = 11.sp, color = Color.Gray)
-            }
-            Switch(
-                checked = cfg.subjectInFrontOfClock,
-                onCheckedChange = { viewModel.toggleSubjectInFrontOfClock() },
-                colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFF00E5FF))
-            )
-        }
     }
 }
 
@@ -572,6 +558,12 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var selectedModel by remember(project.id, project.selectedModel) { mutableStateOf(project.selectedModel) }
     var selectedPipeline by remember(project.id, project.selectedPipeline) { mutableStateOf(project.selectedPipeline) }
     var enablePreprocessing by remember(project.id, project.enablePreprocessing) { mutableStateOf(project.enablePreprocessing) }
+
+    val activeProfile = if (processingMode == ProcessingMode.PIPELINE) {
+        selectedPipeline.tuningProfile
+    } else {
+        selectedModel.tuningProfile
+    }
 
     Column(
         modifier = Modifier
@@ -607,7 +599,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
             Text(
                 text = when (state.previewSurface) {
-                    PreviewSurface.LOCK_SCREEN -> "Showing full lock screen depth wallpaper with floating clock."
+                    PreviewSurface.LOCK_SCREEN -> "Showing full lock screen depth wallpaper with floating clock. Tilt phone or drag preview to inspect parallax."
                     PreviewSurface.HOME_SCREEN -> "Simulating launcher with icons. Clock is auto-hidden to prevent clutter."
                     PreviewSurface.AOD -> "Power-saving pure black OLED display."
                     PreviewSurface.DEPTH_MAP -> "Visualizing AI continuous depth map (white = foreground, dark = background). Tilt phone to inspect depth planes."
@@ -650,7 +642,21 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     }
                     Switch(
                         checked = enablePreprocessing,
-                        onCheckedChange = { enablePreprocessing = it }
+                        onCheckedChange = {
+                            enablePreprocessing = it
+                            viewModel.onTuningChanged(
+                                threshold = threshold,
+                                feathering = feathering,
+                                maskExpansion = maskExpansion,
+                                inpaintRadius = inpaintRadius,
+                                modelType = selectedModel,
+                                cutoutContrast = cutoutContrast,
+                                processingMode = processingMode,
+                                pipelineChoice = selectedPipeline,
+                                enablePreprocessing = it,
+                                debounceMs = 0L
+                            )
+                        }
                     )
                 }
                 Text(
@@ -677,6 +683,24 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         onClick = {
                             selectedModel = model
                             processingMode = ProcessingMode.SINGLE_MODEL
+                            val prof = model.tuningProfile
+                            threshold = prof.sensitivity.default
+                            maskExpansion = prof.maskMargin.default.toInt()
+                            cutoutContrast = prof.layerFlatness.default
+                            feathering = prof.edgeSoftness.default.toInt()
+                            inpaintRadius = prof.inpaintFill.default.toInt()
+                            viewModel.onTuningChanged(
+                                threshold = threshold,
+                                feathering = feathering,
+                                maskExpansion = maskExpansion,
+                                inpaintRadius = inpaintRadius,
+                                modelType = model,
+                                cutoutContrast = cutoutContrast,
+                                processingMode = ProcessingMode.SINGLE_MODEL,
+                                pipelineChoice = selectedPipeline,
+                                enablePreprocessing = enablePreprocessing,
+                                debounceMs = 0L
+                            )
                         },
                         label = { Text(model.shortLabel, fontSize = 11.sp) }
                     )
@@ -707,6 +731,24 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         onClick = {
                             selectedPipeline = pipeline
                             processingMode = ProcessingMode.PIPELINE
+                            val prof = pipeline.tuningProfile
+                            threshold = prof.sensitivity.default
+                            maskExpansion = prof.maskMargin.default.toInt()
+                            cutoutContrast = prof.layerFlatness.default
+                            feathering = prof.edgeSoftness.default.toInt()
+                            inpaintRadius = prof.inpaintFill.default.toInt()
+                            viewModel.onTuningChanged(
+                                threshold = threshold,
+                                feathering = feathering,
+                                maskExpansion = maskExpansion,
+                                inpaintRadius = inpaintRadius,
+                                modelType = selectedModel,
+                                cutoutContrast = cutoutContrast,
+                                processingMode = ProcessingMode.PIPELINE,
+                                pipelineChoice = pipeline,
+                                enablePreprocessing = enablePreprocessing,
+                                debounceMs = 0L
+                            )
                         },
                         label = { Text(pipeline.shortLabel, fontSize = 11.sp) }
                     )
@@ -764,112 +806,142 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 3. Granular AI Tuning Controls (with detailed descriptions)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Granular AI Tuning", fontSize = 12.sp, color = Color.Gray)
+        // 4. Granular AI Tuning Controls with Recommended Default Dots & Live Auto-Reprocess
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Granular AI Tuning (Auto-Reprocesses Live)", fontSize = 12.sp, color = Color.Gray)
 
-            // Sensitivity / Threshold
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Sensitivity", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
-                    Slider(
-                        value = threshold.coerceIn(0.35f, 0.75f),
-                        onValueChange = { threshold = it },
-                        valueRange = 0.35f..0.75f,
-                        modifier = Modifier.weight(1f)
+            // Sensitivity / Threshold Slider with Recommended Dot
+            val sensProf = activeProfile.sensitivity
+            TuningSliderWithDefaultIndicator(
+                title = "Sensitivity",
+                value = threshold,
+                onValueChange = {
+                    threshold = it
+                    viewModel.onTuningChanged(
+                        threshold = it,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        inpaintRadius = inpaintRadius,
+                        modelType = selectedModel,
+                        cutoutContrast = cutoutContrast,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        enablePreprocessing = enablePreprocessing,
+                        debounceMs = 250L
                     )
-                    Text("${(threshold.coerceIn(0.35f, 0.75f) * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
-                }
-                Text(
-                    text = "Adjusts detection threshold (35%–75%). Lower values capture fine hair & clothing contours; higher isolates core subjects tightly. Background sky noise is filtered out for pristine clock visibility.",
-                    fontSize = 10.sp,
-                    color = Color.Gray
-                )
-            }
+                },
+                valueRange = sensProf.min..sensProf.max,
+                recommendedValue = sensProf.default,
+                displayValue = "${(threshold * 100).toInt()}%",
+                description = "Detection confidence threshold. Cyan dot indicates the model's recommended default."
+            )
 
-            // Mask Expansion / Contraction (Choke)
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Mask Margin", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
-                    Slider(
-                        value = maskExpansion.toFloat(),
-                        onValueChange = { maskExpansion = it.toInt() },
-                        valueRange = -10f..10f,
-                        steps = 20,
-                        modifier = Modifier.weight(1f)
+            // Mask Margin (Expansion/Choke) Slider with Recommended Dot
+            val marginProf = activeProfile.maskMargin
+            TuningSliderWithDefaultIndicator(
+                title = "Mask Margin",
+                value = maskExpansion.toFloat(),
+                onValueChange = {
+                    maskExpansion = it.toInt()
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = it.toInt(),
+                        inpaintRadius = inpaintRadius,
+                        modelType = selectedModel,
+                        cutoutContrast = cutoutContrast,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        enablePreprocessing = enablePreprocessing,
+                        debounceMs = 250L
                     )
-                    val label = when {
-                        maskExpansion > 0 -> "+${maskExpansion}px"
-                        maskExpansion < 0 -> "${maskExpansion}px"
-                        else -> "0px"
-                    }
-                    Text(label, fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(42.dp))
-                }
-                Text(
-                    text = "Expands (+) or contracts/chokes (-) subject cutout borders to eliminate background halos or capture extra hair.",
-                    fontSize = 10.sp,
-                    color = Color.Gray
-                )
-            }
+                },
+                valueRange = marginProf.min..marginProf.max,
+                recommendedValue = marginProf.default,
+                steps = marginProf.steps,
+                displayValue = if (maskExpansion > 0) "+${maskExpansion}px" else "${maskExpansion}px",
+                description = "Morphological dilation (+) or erosion (-) to cleanly expand or choke silhouette borders without letting background noise in."
+            )
 
-            // Layer Flatness / Contrast (eliminates translucency and ghost fuzziness)
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Layer Flatness", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
-                    Slider(
-                        value = cutoutContrast,
-                        onValueChange = { cutoutContrast = it },
-                        valueRange = 0.50f..1.0f,
-                        modifier = Modifier.weight(1f)
+            // Layer Flatness (Solid Opacity Contrast) Slider with Recommended Dot
+            val flatProf = activeProfile.layerFlatness
+            TuningSliderWithDefaultIndicator(
+                title = "Layer Flatness",
+                value = cutoutContrast,
+                onValueChange = {
+                    cutoutContrast = it
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        inpaintRadius = inpaintRadius,
+                        modelType = selectedModel,
+                        cutoutContrast = it,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        enablePreprocessing = enablePreprocessing,
+                        debounceMs = 250L
                     )
-                    Text("${(cutoutContrast * 100).toInt()}%", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
-                }
-                Text(
-                    text = "Increases layer opacity contrast to 100% solid. Flattens subjects to completely eliminate semi-transparent fuzziness and ghost text bleed.",
-                    fontSize = 10.sp,
-                    color = Color.Gray
-                )
-            }
+                },
+                valueRange = flatProf.min..flatProf.max,
+                recommendedValue = flatProf.default,
+                displayValue = "${(cutoutContrast * 100).toInt()}%",
+                description = "Increases layer opacity contrast to 100% solid. Flattens subjects to eliminate translucency, fuzziness, and ghost text bleed."
+            )
 
-            // Edge Softness / Feathering
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Edge Softness", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
-                    Slider(
-                        value = feathering.toFloat(),
-                        onValueChange = { feathering = it.toInt() },
-                        valueRange = 1f..16f,
-                        steps = 15,
-                        modifier = Modifier.weight(1f)
+            // Edge Softness (Feathering) Slider with Recommended Dot
+            val softProf = activeProfile.edgeSoftness
+            TuningSliderWithDefaultIndicator(
+                title = "Edge Softness",
+                value = feathering.toFloat(),
+                onValueChange = {
+                    feathering = it.toInt()
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = it.toInt(),
+                        maskExpansion = maskExpansion,
+                        inpaintRadius = inpaintRadius,
+                        modelType = selectedModel,
+                        cutoutContrast = cutoutContrast,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        enablePreprocessing = enablePreprocessing,
+                        debounceMs = 250L
                     )
-                    Text("${feathering}px", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
-                }
-                Text(
-                    text = "Guided matting feather radius to anti-alias and soften subject silhouette edges.",
-                    fontSize = 10.sp,
-                    color = Color.Gray
-                )
-            }
+                },
+                valueRange = softProf.min..softProf.max,
+                recommendedValue = softProf.default,
+                steps = softProf.steps,
+                displayValue = "${feathering}px",
+                description = "Guided matting feather radius to anti-alias and soften subject silhouette edges."
+            )
 
-            // Inpaint Fill / Background Erasure Radius
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Inpaint Fill", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
-                    Slider(
-                        value = inpaintRadius.toFloat(),
-                        onValueChange = { inpaintRadius = it.toInt() },
-                        valueRange = 2f..16f,
-                        steps = 14,
-                        modifier = Modifier.weight(1f)
+            // Inpaint Fill Slider with Recommended Dot
+            val inpaintProf = activeProfile.inpaintFill
+            TuningSliderWithDefaultIndicator(
+                title = "Inpaint Fill",
+                value = inpaintRadius.toFloat(),
+                onValueChange = {
+                    inpaintRadius = it.toInt()
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        inpaintRadius = it.toInt(),
+                        modelType = selectedModel,
+                        cutoutContrast = cutoutContrast,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        enablePreprocessing = enablePreprocessing,
+                        debounceMs = 250L
                     )
-                    Text("${inpaintRadius}px", fontSize = 11.sp, color = Color.LightGray, modifier = Modifier.width(36.dp))
-                }
-                Text(
-                    text = "Dilation margin to erase subjects underneath and reconstruct background using multi-scale pyramid synthesis with bilinear upsampling.",
-                    fontSize = 10.sp,
-                    color = Color.Gray
-                )
-            }
+                },
+                valueRange = inpaintProf.min..inpaintProf.max,
+                recommendedValue = inpaintProf.default,
+                steps = inpaintProf.steps,
+                displayValue = "${inpaintRadius}px",
+                description = "Occlusion erasure margin. Completely reconstructs background underneath to ensure zero duplicate subjects on parallax tilt."
+            )
 
             // 3D Parallax Intensity
             Column {
@@ -891,7 +963,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 4. Action Button: Re-Segment & Update Layers
+        // 5. Status / Force Reprocess Button (Auto-reprocess runs on any change; button provides manual refresh)
         Button(
             onClick = {
                 viewModel.reprocessWithTuning(
@@ -918,13 +990,105 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     strokeWidth = 2.dp
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Segmenting & Inpainting...", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("AI Reprocessing Live...", color = Color.Black, fontWeight = FontWeight.Bold)
             } else {
                 Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Re-Segment & Update Layers", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Force Refresh Layers", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         }
+    }
+}
+
+/**
+ * Modern M3 Slider with an indicator dot on the track indicating the recommended default value for the active model,
+ * a clickable reset pill, and live value badge.
+ */
+@Composable
+fun TuningSliderWithDefaultIndicator(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    recommendedValue: Float,
+    displayValue: String,
+    description: String,
+    steps: Int = 0,
+    modifier: Modifier = Modifier
+) {
+    val span = max(0.0001f, valueRange.endInclusive - valueRange.start)
+    val fraction = ((recommendedValue - valueRange.start) / span).coerceIn(0f, 1f)
+    val isNearRecommended = abs(value - recommendedValue) <= (span * 0.025f)
+
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    color = if (isNearRecommended) Color(0xFF00E5FF).copy(alpha = 0.20f) else Color(0xFF28283E),
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.clickable { onValueChange(recommendedValue) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E5FF))
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isNearRecommended) "Recommended" else "Reset Rec",
+                            fontSize = 9.sp,
+                            color = if (isNearRecommended) Color(0xFF00E5FF) else Color.LightGray,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            Text(displayValue, fontSize = 11.sp, color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+        }
+
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+            Slider(
+                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+                onValueChange = onValueChange,
+                valueRange = valueRange,
+                steps = steps,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Recommended indicator dot overlay on the track
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .wrapContentWidth(Alignment.End)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00E5FF))
+                            .border(1.dp, Color(0xFF0A0A12), CircleShape)
+                    )
+                }
+            }
+        }
+
+        Text(description, fontSize = 10.sp, color = Color.Gray, lineHeight = 13.sp)
     }
 }
 

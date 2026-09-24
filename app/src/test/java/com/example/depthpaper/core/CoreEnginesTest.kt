@@ -63,4 +63,40 @@ class CoreEnginesTest {
         val alpha = GuidedMattingFilter.sampleGuidedAlpha(coeff, 0.5f, 0.1f, 0.5f)
         assertTrue(alpha in 0f..1f)
     }
+
+    @Test
+    fun testModelTuningProfilesValid() {
+        for (model in AiModelChoice.entries) {
+            val prof = model.tuningProfile
+            assertTrue(prof.sensitivity.min < prof.sensitivity.max)
+            assertTrue(prof.sensitivity.default in prof.sensitivity.min..prof.sensitivity.max)
+            assertTrue(prof.maskMargin.min < prof.maskMargin.max)
+            assertTrue(prof.layerFlatness.min < prof.layerFlatness.max)
+            assertTrue(prof.edgeSoftness.min < prof.edgeSoftness.max)
+            assertTrue(prof.inpaintFill.min < prof.inpaintFill.max)
+        }
+
+        for (pipeline in AiPipelineChoice.entries) {
+            val prof = pipeline.tuningProfile
+            assertTrue(prof.sensitivity.min < prof.sensitivity.max)
+            assertTrue(prof.sensitivity.default in prof.sensitivity.min..prof.sensitivity.max)
+            assertTrue(prof.maskMargin.min < prof.maskMargin.max)
+            assertTrue(prof.layerFlatness.min < prof.layerFlatness.max)
+            assertTrue(prof.edgeSoftness.min < prof.edgeSoftness.max)
+            assertTrue(prof.inpaintFill.min < prof.inpaintFill.max)
+        }
+    }
+
+    @Test
+    fun testBilinearMaskSampling() {
+        val w = 2
+        val h = 2
+        val mask = floatArrayOf(
+            0.0f, 1.0f,
+            0.0f, 1.0f
+        )
+        // Midpoint u=0.5, v=0.5 -> average of 0 and 1 is 0.5
+        val sample = InpaintingEngine.sampleMaskBilinear(mask, w, h, 0.5f, 0.5f)
+        assertEquals(0.5f, sample, 0.01f)
+    }
 }

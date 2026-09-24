@@ -8,6 +8,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -85,8 +87,11 @@ fun ParallaxViewport(
 
     // Gyroscope tracking (runs continuously without disposing on project metadata updates)
     DisposableEffect(Unit) {
+        val mainHandler = Handler(Looper.getMainLooper())
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         val rotSensor = sm?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            ?: sm?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+            ?: sm?.getDefaultSensor(Sensor.TYPE_GRAVITY)
             ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         val listener = object : SensorEventListener {
@@ -96,29 +101,31 @@ fun ParallaxViewport(
                 sensorFilter.smoothingFactor = cfg.sensorSmoothing
                 sensorFilter.maxAngleDegrees = cfg.maxTiltAngle
 
-                if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
-                    val rotMatrix = FloatArray(9)
-                    SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
-                    val orientation = FloatArray(3)
-                    SensorManager.getOrientation(rotMatrix, orientation)
+                val (rawX, rawY) = when (event.sensor.type) {
+                    Sensor.TYPE_ROTATION_VECTOR, Sensor.TYPE_GAME_ROTATION_VECTOR -> {
+                        val rotMatrix = FloatArray(9)
+                        SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
+                        val orientation = FloatArray(3)
+                        SensorManager.getOrientation(rotMatrix, orientation)
 
-                    val pitchDeg = Math.toDegrees(orientation[1].toDouble()).toFloat()
-                    val rollDeg = Math.toDegrees(orientation[2].toDouble()).toFloat()
+                        val pitchDeg = Math.toDegrees(orientation[1].toDouble()).toFloat()
+                        val rollDeg = Math.toDegrees(orientation[2].toDouble()).toFloat()
+                        sensorFilter.update(rollDeg, pitchDeg)
+                    }
+                    Sensor.TYPE_GRAVITY, Sensor.TYPE_ACCELEROMETER -> {
+                        val ax = event.values[0]
+                        val ay = event.values[1]
+                        sensorFilter.update(ax * 3.5f, ay * 3.5f)
+                    }
+                    else -> Pair(0f, 0f)
+                }
 
-                    val (nx, ny) = sensorFilter.update(rollDeg, pitchDeg)
-                    val signX = if (cfg.invertX) -1f else 1f
-                    val signY = if (cfg.invertY) -1f else 1f
+                val signX = if (cfg.invertX) -1f else 1f
+                val signY = if (cfg.invertY) -1f else 1f
 
-                    sensorTiltX = nx * signX
-                    sensorTiltY = ny * signY
-                } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
-                    val ax = event.values[0]
-                    val ay = event.values[1]
-                    val (nx, ny) = sensorFilter.update(ax * 3f, ay * 3f)
-                    val signX = if (cfg.invertX) -1f else 1f
-                    val signY = if (cfg.invertY) -1f else 1f
-                    sensorTiltX = nx * signX
-                    sensorTiltY = ny * signY
+                mainHandler.post {
+                    sensorTiltX = (rawX * signX).coerceIn(-1f, 1f)
+                    sensorTiltY = (rawY * signY).coerceIn(-1f, 1f)
                 }
             }
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
@@ -290,7 +297,7 @@ fun ParallaxViewport(
 
             // --- Normal & Parallax Rendering ---
             val intensity = project.motionConfig.parallaxIntensity.coerceAtLeast(0.3f)
-            val maxShift = canvasW * 0.08f * intensity
+            val maxShift = canvasW * 0.12f * intensity
             val shiftX = totalTiltX * maxShift
             val shiftY = totalTiltY * maxShift
 
@@ -310,24 +317,24 @@ fun ParallaxViewport(
             val drawSize = IntSize(drawW, drawH)
 
             // Positive differential parallax:
-            // Background is furthest away (-0.15x)
-            // Clock is midground (+0.30x)
-            // Cutout subject is nearest (+0.70x)
+            // Background is furthest away (-0.25x)
+            // Clock is midground (+0.35x)
+            // Cutout subject is nearest (+0.75x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
-            val bgShiftX = if (isLayeredMode) shiftX * -0.15f else shiftX * 0.20f
-            val bgShiftY = if (isLayeredMode) shiftY * -0.15f else shiftY * 0.20f
-            val clockParallaxShiftX = shiftX * 0.30f
-            val clockParallaxShiftY = shiftY * 0.30f
-            val fgShiftX = shiftX * 0.70f
-            val fgShiftY = shiftY * 0.70f
+            val bgShiftX = if (isLayeredMode) shiftX * -0.25f else shiftX * 0.20f
+            val bgShiftY = if (isLayeredMode) shiftY * -0.25f else shiftY * 0.20f
+            val clockParallaxShiftX = shiftX * 0.35f
+            val clockParallaxShiftY = shiftY * 0.35f
+            val fgShiftX = shiftX * 0.75f
+            val fgShiftY = shiftY * 0.75f
 
             val bgLeft = baseLeft + bgShiftX.roundToInt()
             val bgTop = baseTop + bgShiftY.roundToInt()
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
 
-            // 1. Draw Background Photo Plate (In Layered 2.5D mode, sourceBmp is 100% pristine original photo with zero distortion!)
-            val bgBmp = if (isLayeredMode) (sourceBmp ?: backgroundBmp) else (backgroundBmp ?: sourceBmp)
+            // 1. Draw Background Photo Plate (Always use inpainted background behind cutout to prevent duplicate subject on parallax tilt)
+            val bgBmp = backgroundBmp ?: sourceBmp
             bgBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),

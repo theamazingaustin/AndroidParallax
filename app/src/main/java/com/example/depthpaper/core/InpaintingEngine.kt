@@ -90,8 +90,8 @@ object InpaintingEngine {
             return outBmp
         }
 
-        // 2. Fast Separable 2D Box Dilation: clamped to 2..16px to prevent over-dilation into background
-        val dR = dilationRadius.coerceIn(2, 16)
+        // 2. Fast Separable 2D Box Dilation: clamped to 2..48px for thorough occlusion erasure
+        val dR = dilationRadius.coerceIn(2, 48)
         val tempDilated = BooleanArray(w * h)
         val dilatedHole = BooleanArray(w * h)
 

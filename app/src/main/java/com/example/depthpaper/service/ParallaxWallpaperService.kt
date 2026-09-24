@@ -168,11 +168,7 @@ class ParallaxWallpaperService : WallpaperService() {
             if (proj != null && proj.id != activeProject?.id) {
                 activeProject = proj
                 AppLogger.i("WallpaperService", "Active project loaded: ${proj.title} (${proj.id}), mode=${proj.renderMode}")
-                bgBitmap = if (proj.renderMode == RenderMode.LAYERED_2D) {
-                    repository.loadBitmap(proj.sourceImagePath) ?: repository.loadBitmap(proj.inpaintedBackgroundPath)
-                } else {
-                    repository.loadBitmap(proj.inpaintedBackgroundPath) ?: repository.loadBitmap(proj.sourceImagePath)
-                }
+                bgBitmap = repository.loadBitmap(proj.inpaintedBackgroundPath) ?: repository.loadBitmap(proj.sourceImagePath)
                 fgBitmap = repository.loadBitmap(proj.cutoutImagePath)
                 depthBitmap = repository.loadBitmap(proj.depthMapPath)
                 AppLogger.i("WallpaperService", "Plates loaded: bg=${bgBitmap != null}, fg=${fgBitmap != null}, depth=${depthBitmap != null}")

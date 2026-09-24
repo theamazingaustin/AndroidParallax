@@ -18,6 +18,8 @@ import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import com.example.depthpaper.service.ParallaxWallpaperService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -302,7 +304,14 @@ class StudioViewModel(
         _uiState.value = _uiState.value.copy(currentProject = updated)
     }
 
-    fun reprocessWithTuning(
+    private var reprocessJob: Job? = null
+
+    /**
+     * Reactively reprocesses the image with new tuning parameters.
+     * Supports debouncing for smooth slider dragging (cancels in-flight tasks),
+     * and immediate execution (0ms) for model/pipeline/toggle clicks.
+     */
+    fun onTuningChanged(
         threshold: Float = _uiState.value.currentProject.threshold,
         feathering: Int = _uiState.value.currentProject.edgeFeathering,
         maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
@@ -311,13 +320,37 @@ class StudioViewModel(
         cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
         processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
         pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
-        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing
+        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing,
+        debounceMs: Long = 250L
     ) {
         val src = _uiState.value.sourceBitmap ?: return
-        _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "Refining segmentation & layers...")
+        val activeModel = modelType ?: _uiState.value.currentProject.selectedModel
 
-        viewModelScope.launch(Dispatchers.Default) {
-            val activeModel = modelType ?: _uiState.value.currentProject.selectedModel
+        val updatedMeta = _uiState.value.currentProject.copy(
+            threshold = threshold,
+            edgeFeathering = feathering,
+            maskExpansion = maskExpansion,
+            inpaintRadius = inpaintRadius,
+            cutoutContrast = cutoutContrast,
+            processingMode = processingMode,
+            selectedModel = activeModel,
+            selectedPipeline = pipelineChoice,
+            enablePreprocessing = enablePreprocessing
+        )
+
+        // Instantly update project state for smooth UI reactivity
+        _uiState.value = _uiState.value.copy(
+            currentProject = updatedMeta,
+            isProcessing = true,
+            statusMessage = "AI Reprocessing (${if (processingMode == ProcessingMode.PIPELINE) pipelineChoice.shortLabel else activeModel.shortLabel})..."
+        )
+
+        reprocessJob?.cancel()
+        reprocessJob = viewModelScope.launch(Dispatchers.Default) {
+            if (debounceMs > 0) {
+                delay(debounceMs)
+            }
+
             segmentationEngine.setProcessingMode(processingMode)
             if (processingMode == ProcessingMode.SINGLE_MODEL) {
                 segmentationEngine.setModelChoice(activeModel)
@@ -338,20 +371,8 @@ class StudioViewModel(
                 pipelineChoice = pipelineChoice
             )
 
-            val cur = _uiState.value.currentProject.copy(
-                threshold = threshold,
-                edgeFeathering = feathering,
-                maskExpansion = maskExpansion,
-                inpaintRadius = inpaintRadius,
-                cutoutContrast = cutoutContrast,
-                processingMode = processingMode,
-                selectedModel = activeModel,
-                selectedPipeline = pipelineChoice,
-                enablePreprocessing = enablePreprocessing
-            )
-
             val saved = repository.saveProject(
-                project = cur,
+                project = updatedMeta,
                 cutoutBmp = result.foregroundCutout,
                 inpaintedBgBmp = result.inpaintedBackground,
                 depthBmp = result.depthMap
@@ -368,6 +389,31 @@ class StudioViewModel(
                 )
             }
         }
+    }
+
+    fun reprocessWithTuning(
+        threshold: Float = _uiState.value.currentProject.threshold,
+        feathering: Int = _uiState.value.currentProject.edgeFeathering,
+        maskExpansion: Int = _uiState.value.currentProject.maskExpansion,
+        inpaintRadius: Int = _uiState.value.currentProject.inpaintRadius,
+        modelType: AiModelChoice? = null,
+        cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
+        processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
+        pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
+        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing
+    ) {
+        onTuningChanged(
+            threshold = threshold,
+            feathering = feathering,
+            maskExpansion = maskExpansion,
+            inpaintRadius = inpaintRadius,
+            modelType = modelType,
+            cutoutContrast = cutoutContrast,
+            processingMode = processingMode,
+            pipelineChoice = pipelineChoice,
+            enablePreprocessing = enablePreprocessing,
+            debounceMs = 0L
+        )
     }
 
     fun getCurrentModelType(): AiModelChoice = segmentationEngine.currentModelChoice
