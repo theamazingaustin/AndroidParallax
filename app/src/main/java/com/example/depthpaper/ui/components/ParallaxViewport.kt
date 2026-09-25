@@ -315,7 +315,7 @@ fun ParallaxViewport(
                         textAlign = android.graphics.Paint.Align.CENTER
                         setShadowLayer(10f, 0f, 2f, android.graphics.Color.BLACK)
                     }
-                    nativeCanvas.nativeCanvas.drawText("3D DEPTH MAP (WHITE = FOREGROUND)", canvasW * 0.5f, canvasH * 0.94f, paint)
+                    nativeCanvas.nativeCanvas.drawText("3D DEPTH MAP (WARM = NEAR  COOL = FAR)", canvasW * 0.5f, canvasH * 0.94f, paint)
                 }
                 return@Canvas
             }
