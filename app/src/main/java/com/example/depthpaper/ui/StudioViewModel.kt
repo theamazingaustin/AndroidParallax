@@ -21,6 +21,8 @@ import com.example.depthpaper.service.ParallaxWallpaperService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,6 +66,28 @@ class StudioViewModel(
 
     private val _uiState = MutableStateFlow(StudioUiState())
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
+
+    private var saveJob: Job? = null
+    private var cachedNormalizedDepth: FloatArray? = null
+    private var cachedDepthW: Int = 0
+    private var cachedDepthH: Int = 0
+
+    private fun ensureCachedDepth(): Boolean {
+        if (cachedNormalizedDepth != null && cachedDepthW > 0 && cachedDepthH > 0) return true
+        val depthBmp = _uiState.value.depthBitmap ?: return false
+        val w = depthBmp.width
+        val h = depthBmp.height
+        val pixels = IntArray(w * h)
+        depthBmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        val depthArr = FloatArray(w * h)
+        for (i in 0 until (w * h)) {
+            depthArr[i] = (Color.red(pixels[i]) / 255.0f).coerceIn(0f, 1f)
+        }
+        cachedNormalizedDepth = depthArr
+        cachedDepthW = w
+        cachedDepthH = h
+        return true
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -130,6 +154,12 @@ class StudioViewModel(
             val thumbH = if (thumbScale < 1f) (bitmap.height * thumbScale).toInt() else bitmap.height
             val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
 
+            if (result.normalizedDepth != null) {
+                cachedNormalizedDepth = result.normalizedDepth
+                cachedDepthW = result.depthWidth
+                cachedDepthH = result.depthHeight
+            }
+
             val saved = repository.saveProject(
                 project = newProject,
                 sourceBmp = bitmap,
@@ -190,6 +220,12 @@ class StudioViewModel(
             val updated = cur.copy(
                 renderMode = detectedMode
             )
+
+            if (result.normalizedDepth != null) {
+                cachedNormalizedDepth = result.normalizedDepth
+                cachedDepthW = result.depthWidth
+                cachedDepthH = result.depthHeight
+            }
 
             val saved = repository.saveProject(
                 project = updated,
@@ -336,6 +372,7 @@ class StudioViewModel(
         fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
         enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
         holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius,
+        depthLayerCount: Int = _uiState.value.currentProject.depthLayerCount,
         debounceMs: Long = 250L
     ) {
         val src = _uiState.value.sourceBitmap ?: return
@@ -349,6 +386,7 @@ class StudioViewModel(
             cutoutContrast = cutoutContrast,
             depthPlaneOffset = depthPlaneOffset,
             clockZDepth = clockZDepth,
+            depthLayerCount = depthLayerCount,
             fusionBalance = fusionBalance,
             enableHoleFilling = enableHoleFilling,
             holeFillingRadius = holeFillingRadius,
@@ -391,8 +429,15 @@ class StudioViewModel(
                 depthPlaneOffset = depthPlaneOffset,
                 fusionBalance = fusionBalance,
                 enableHoleFilling = enableHoleFilling,
-                holeFillingRadius = holeFillingRadius
+                holeFillingRadius = holeFillingRadius,
+                depthLayerCount = depthLayerCount
             )
+
+            if (result.normalizedDepth != null) {
+                cachedNormalizedDepth = result.normalizedDepth
+                cachedDepthW = result.depthWidth
+                cachedDepthH = result.depthHeight
+            }
 
             val saved = repository.saveProject(
                 project = updatedMeta,
@@ -427,7 +472,8 @@ class StudioViewModel(
         depthPlaneOffset: Float = _uiState.value.currentProject.depthPlaneOffset,
         fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
         enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
-        holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius
+        holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius,
+        depthLayerCount: Int = _uiState.value.currentProject.depthLayerCount
     ) {
         onTuningChanged(
             threshold = threshold,
@@ -443,25 +489,101 @@ class StudioViewModel(
             fusionBalance = fusionBalance,
             enableHoleFilling = enableHoleFilling,
             holeFillingRadius = holeFillingRadius,
+            depthLayerCount = depthLayerCount,
             debounceMs = 0L
         )
     }
 
+    /**
+     * Instantly updates depth layer count (2 to 20) in < 5ms without re-running TFLite.
+     */
+    fun updateDepthLayerCount(count: Int) {
+        val src = _uiState.value.sourceBitmap ?: return
+        val cur = _uiState.value.currentProject
+        val newCount = count.coerceIn(2, 20)
+        val updatedMeta = cur.copy(depthLayerCount = newCount)
+
+        if (ensureCachedDepth()) {
+            val depth = cachedNormalizedDepth ?: return
+            val newCutout = segmentationEngine.generateMultiLayerCutout(
+                sourceBmp = src,
+                normalizedDepth = depth,
+                depthW = cachedDepthW,
+                depthH = cachedDepthH,
+                layerCount = newCount,
+                clockZDepth = updatedMeta.clockZDepth,
+                edgeFeathering = updatedMeta.edgeFeathering,
+                enableHoleFilling = updatedMeta.enableHoleFilling
+            )
+            _uiState.value = _uiState.value.copy(
+                currentProject = updatedMeta,
+                cutoutBitmap = newCutout
+            )
+            saveJob?.cancel()
+            saveJob = viewModelScope.launch(Dispatchers.IO) {
+                delay(400)
+                repository.saveProject(updatedMeta, cutoutBmp = newCutout)
+            }
+        } else {
+            onTuningChanged(depthLayerCount = newCount, debounceMs = 0L)
+        }
+    }
+
+    /**
+     * Instantly adjusts Clock Z-depth (0.0 to 1.0) at 60 FPS in < 5ms without re-running TFLite.
+     */
     fun onClockZDepthChanged(zDepth: Float) {
-        onTuningChanged(clockZDepth = zDepth, debounceMs = 150L)
+        val src = _uiState.value.sourceBitmap ?: return
+        val cur = _uiState.value.currentProject
+        val newZ = zDepth.coerceIn(0.0f, 1.0f)
+        val updatedMeta = cur.copy(clockZDepth = newZ)
+
+        if (ensureCachedDepth()) {
+            val depth = cachedNormalizedDepth ?: return
+            val newCutout = segmentationEngine.generateMultiLayerCutout(
+                sourceBmp = src,
+                normalizedDepth = depth,
+                depthW = cachedDepthW,
+                depthH = cachedDepthH,
+                layerCount = updatedMeta.depthLayerCount,
+                clockZDepth = newZ,
+                edgeFeathering = updatedMeta.edgeFeathering,
+                enableHoleFilling = updatedMeta.enableHoleFilling
+            )
+            _uiState.value = _uiState.value.copy(
+                currentProject = updatedMeta,
+                cutoutBitmap = newCutout
+            )
+            saveJob?.cancel()
+            saveJob = viewModelScope.launch(Dispatchers.IO) {
+                delay(400)
+                repository.saveProject(updatedMeta, cutoutBmp = newCutout)
+            }
+        } else {
+            onTuningChanged(clockZDepth = newZ, debounceMs = 150L)
+        }
     }
 
     fun onHoleFillingChanged(enabled: Boolean, radius: Int = _uiState.value.currentProject.holeFillingRadius) {
         onTuningChanged(enableHoleFilling = enabled, holeFillingRadius = radius, debounceMs = 0L)
     }
 
+    /**
+     * Tapping on the preview samples continuous 3D depth, snaps to the layer boundary,
+     * and sets Clock Z-depth instantaneously (< 5ms).
+     */
     fun onTapPreviewCoordinate(normX: Float, normY: Float) {
-        val depthBmp = _uiState.value.depthBitmap ?: return
-        val px = (normX * (depthBmp.width - 1)).toInt().coerceIn(0, depthBmp.width - 1)
-        val py = (normY * (depthBmp.height - 1)).toInt().coerceIn(0, depthBmp.height - 1)
-        val color = depthBmp.getPixel(px, py)
-        val sampledZ = (Color.red(color) / 255.0f).coerceIn(0.05f, 0.95f)
-        onTuningChanged(clockZDepth = sampledZ, debounceMs = 0L)
+        if (!ensureCachedDepth()) return
+        val depth = cachedNormalizedDepth ?: return
+        val px = (normX * (cachedDepthW - 1)).toInt().coerceIn(0, cachedDepthW - 1)
+        val py = (normY * (cachedDepthH - 1)).toInt().coerceIn(0, cachedDepthH - 1)
+        val continuousZ = depth[py * cachedDepthW + px]
+        
+        val K = _uiState.value.currentProject.depthLayerCount.coerceIn(2, 20)
+        val layerIdx = min(K - 1, (continuousZ * K).toInt())
+        val snappedZ = (layerIdx.toFloat() / (K - 1)).coerceIn(0.0f, 1.0f)
+
+        onClockZDepthChanged(snappedZ)
     }
 
     fun getCurrentModelType(): AiModelChoice = segmentationEngine.currentModelChoice

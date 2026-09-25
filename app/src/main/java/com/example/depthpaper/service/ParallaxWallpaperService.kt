@@ -236,8 +236,9 @@ class ParallaxWallpaperService : WallpaperService() {
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && fgBitmap != null
             val bgShiftX = if (isLayeredMode) shiftX * -0.15f else shiftX * 0.20f
             val bgShiftY = if (isLayeredMode) shiftY * -0.15f else shiftY * 0.20f
-            val clockShiftX = shiftX * 0.30f
-            val clockShiftY = shiftY * 0.30f
+            val clockDepthFactor = (-0.15f + 0.80f * project.clockZDepth).coerceIn(-0.20f, 0.70f)
+            val clockShiftX = shiftX * clockDepthFactor
+            val clockShiftY = shiftY * clockDepthFactor
             val fgShiftX = shiftX * 0.70f
             val fgShiftY = shiftY * 0.70f
 
@@ -254,21 +255,9 @@ class ParallaxWallpaperService : WallpaperService() {
                 baseTop + fgShiftY + drawH
             )
 
-            // 1. Draw Background Layer
-            bgBitmap?.let { bmp ->
-                canvas.drawBitmap(bmp, null, bgDest, null)
-            } ?: run {
-                canvas.drawColor(Color.parseColor("#1A1A2E"))
-            }
+            val isInFrontOfEverything = project.clockZDepth >= 0.999f || !project.lockScreenConfig.subjectInFrontOfClock
 
-            // Optional Home Screen Dimming for icon legibility
-            if (!isLocked && project.homeScreenConfig.dimmingFactor > 0f) {
-                val alpha = (project.homeScreenConfig.dimmingFactor * 255).toInt().coerceIn(0, 255)
-                dimPaint.color = Color.argb(alpha, 0, 0, 0)
-                canvas.drawRect(0f, 0f, w, h, dimPaint)
-            }
-
-            // 2. Clock Layer (interleaved at midground depth)
+            // 2. Clock Layer definition
             val drawClockAction = {
                 if (showClock) {
                     val cfg = project.lockScreenConfig
@@ -293,8 +282,22 @@ class ParallaxWallpaperService : WallpaperService() {
                 }
             }
 
-            // In Layered 2D, if clock is behind subject, draw clock first
-            if (project.lockScreenConfig.subjectInFrontOfClock && isLayeredMode) {
+            // 1. Draw Background Layer
+            bgBitmap?.let { bmp ->
+                canvas.drawBitmap(bmp, null, bgDest, null)
+            } ?: run {
+                canvas.drawColor(Color.parseColor("#1A1A2E"))
+            }
+
+            // Optional Home Screen Dimming for icon legibility
+            if (!isLocked && project.homeScreenConfig.dimmingFactor > 0f) {
+                val alpha = (project.homeScreenConfig.dimmingFactor * 255).toInt().coerceIn(0, 255)
+                dimPaint.color = Color.argb(alpha, 0, 0, 0)
+                canvas.drawRect(0f, 0f, w, h, dimPaint)
+            }
+
+            // Midground clock
+            if (!isInFrontOfEverything && isLayeredMode) {
                 drawClockAction()
             }
 
@@ -305,8 +308,8 @@ class ParallaxWallpaperService : WallpaperService() {
                 }
             }
 
-            // In 3D Perspective mode or when subject is behind clock, draw clock on top
-            if (!project.lockScreenConfig.subjectInFrontOfClock || !isLayeredMode) {
+            // In 3D Perspective mode or when clock is in front of everything, draw clock on top
+            if (isInFrontOfEverything || !isLayeredMode) {
                 drawClockAction()
             }
         }

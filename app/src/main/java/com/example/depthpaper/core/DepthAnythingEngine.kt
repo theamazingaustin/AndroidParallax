@@ -64,6 +64,7 @@ object DepthAnythingEngine {
             context.assets.openFd(modelAsset)
             modelAsset
         } catch (_: Exception) {
+            AppLogger.i(TAG, "Requested model asset $modelAsset not bundled; using $MODEL_SMALL_ASSET")
             MODEL_SMALL_ASSET
         }
 
@@ -306,19 +307,24 @@ object DepthAnythingEngine {
         val naturalGap = computeNaturalDepthGap(unpaddedDepth)
 
         // 8. 2D Continuous Clock Z-Depth Separation
-        // Replaces 1D scanline slicing with 2D spatial continuity
-        val zCut = clockZDepth.coerceIn(0.05f, 0.95f)
-        val halfBand = 0.05f
-        val bandDenom = max(0.0001f, halfBand * 2f)
-
-        for (i in 0 until (outW * outH)) {
-            val d = unpaddedDepth[i]
-            val conf = when {
-                d >= zCut + halfBand -> 1.0f
-                d <= zCut - halfBand -> 0.0f
-                else -> ((d - (zCut - halfBand)) / bandDenom).coerceIn(0f, 1f)
+        // Full Z-axis freedom: 0.0 = behind everything, 1.0 = in front of everything
+        val zCut = clockZDepth.coerceIn(0.0f, 1.0f)
+        if (zCut <= 0.001f) {
+            fgMask.fill(1.0f)
+        } else if (zCut >= 0.999f) {
+            fgMask.fill(0.0f)
+        } else {
+            val halfBand = 0.04f
+            val bandDenom = max(0.0001f, halfBand * 2f)
+            for (i in 0 until (outW * outH)) {
+                val d = unpaddedDepth[i]
+                val conf = when {
+                    d >= zCut + halfBand -> 1.0f
+                    d <= zCut - halfBand -> 0.0f
+                    else -> ((d - (zCut - halfBand)) / bandDenom).coerceIn(0f, 1f)
+                }
+                fgMask[i] = conf
             }
-            fgMask[i] = conf
         }
 
         val depthBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)

@@ -348,8 +348,9 @@ fun ParallaxViewport(
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
             val bgShiftX = if (isLayeredMode) shiftX * -0.25f else shiftX * 0.20f
             val bgShiftY = if (isLayeredMode) shiftY * -0.25f else shiftY * 0.20f
-            val clockParallaxShiftX = shiftX * 0.35f
-            val clockParallaxShiftY = shiftY * 0.35f
+            val clockDepthFactor = (-0.20f + 0.85f * project.clockZDepth).coerceIn(-0.25f, 0.75f)
+            val clockParallaxShiftX = shiftX * clockDepthFactor
+            val clockParallaxShiftY = shiftY * clockDepthFactor
             val fgShiftX = shiftX * 0.75f
             val fgShiftY = shiftY * 0.75f
 
@@ -358,25 +359,9 @@ fun ParallaxViewport(
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
 
-            // 1. Draw Background Photo Plate
-            val bgBmp = if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
-            bgBmp?.let { bmp ->
-                drawImage(
-                    image = bmp.asImageBitmap(),
-                    dstOffset = IntOffset(bgLeft, bgTop),
-                    dstSize = drawSize
-                )
-            }
+            val isInFrontOfEverything = project.clockZDepth >= 0.999f || !project.lockScreenConfig.subjectInFrontOfClock
 
-            // Home screen icon contrast dimming
-            if (previewSurface == PreviewSurface.HOME_SCREEN && project.homeScreenConfig.dimmingFactor > 0f) {
-                drawRect(
-                    color = Color.Black.copy(alpha = project.homeScreenConfig.dimmingFactor),
-                    size = size
-                )
-            }
-
-            // 2. Draw Lock Screen Clock
+            // 2. Draw Lock Screen Clock definition
             val showClock = previewSurface == PreviewSurface.LOCK_SCREEN || !project.homeScreenConfig.hideClockOnHomeScreen
             val drawClock = {
                 if (showClock) {
@@ -440,8 +425,26 @@ fun ParallaxViewport(
                 }
             }
 
-            // Depth order: In Layered 2D, Clock is drawn behind subject cutout
-            if (project.lockScreenConfig.subjectInFrontOfClock && isLayeredMode) {
+            // 1. Draw Background Photo Plate
+            val bgBmp = if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
+            bgBmp?.let { bmp ->
+                drawImage(
+                    image = bmp.asImageBitmap(),
+                    dstOffset = IntOffset(bgLeft, bgTop),
+                    dstSize = drawSize
+                )
+            }
+
+            // Home screen icon contrast dimming
+            if (previewSurface == PreviewSurface.HOME_SCREEN && project.homeScreenConfig.dimmingFactor > 0f) {
+                drawRect(
+                    color = Color.Black.copy(alpha = project.homeScreenConfig.dimmingFactor),
+                    size = size
+                )
+            }
+
+            // Depth order: Midground Clock is drawn behind subject cutout
+            if (!isInFrontOfEverything && isLayeredMode) {
                 drawClock()
             }
 
@@ -456,8 +459,8 @@ fun ParallaxViewport(
                 }
             }
 
-            // In 3D Perspective mode or when Subject in Front is disabled, clock is drawn on top
-            if (!project.lockScreenConfig.subjectInFrontOfClock || !isLayeredMode) {
+            // If clock is in front of everything, draw clock on top
+            if (isInFrontOfEverything || !isLayeredMode) {
                 drawClock()
             }
         }

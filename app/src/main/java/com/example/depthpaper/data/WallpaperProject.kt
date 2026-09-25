@@ -150,8 +150,9 @@ data class WallpaperProject(
     val enableHoleFilling: Boolean = true,
     val holeFillingRadius: Int = 8,
     val processingMode: ProcessingMode = ProcessingMode.PIPELINE,
+    val depthLayerCount: Int = 8,
     val selectedModel: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
-    val selectedPipeline: AiPipelineChoice = AiPipelineChoice.DEPTH_MATTING_FUSION,
+    val selectedPipeline: AiPipelineChoice = AiPipelineChoice.MULTI_LAYER_DEPTH,
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
@@ -179,6 +180,7 @@ data class WallpaperProject(
         put("cutoutContrast", cutoutContrast.toDouble())
         put("depthPlaneOffset", depthPlaneOffset.toDouble())
         put("clockZDepth", clockZDepth.toDouble())
+        put("depthLayerCount", depthLayerCount)
         put("fusionBalance", fusionBalance.toDouble())
         put("enableHoleFilling", enableHoleFilling)
         put("holeFillingRadius", holeFillingRadius)
@@ -214,12 +216,13 @@ data class WallpaperProject(
             cutoutContrast = json.optDouble("cutoutContrast", 0.85).toFloat(),
             depthPlaneOffset = json.optDouble("depthPlaneOffset", 0.50).toFloat(),
             clockZDepth = json.optDouble("clockZDepth", json.optDouble("depthPlaneOffset", 0.50)).toFloat(),
+            depthLayerCount = json.optInt("depthLayerCount", 8),
             fusionBalance = json.optDouble("fusionBalance", 0.50).toFloat(),
             enableHoleFilling = json.optBoolean("enableHoleFilling", true),
             holeFillingRadius = json.optInt("holeFillingRadius", 8),
             processingMode = runCatching { ProcessingMode.valueOf(json.optString("processingMode", "PIPELINE")) }.getOrDefault(ProcessingMode.PIPELINE),
             selectedModel = runCatching { AiModelChoice.fromId(json.optString("selectedModel", "DEPTH_ANYTHING_V2")) }.getOrDefault(AiModelChoice.DEPTH_ANYTHING_V2),
-            selectedPipeline = runCatching { AiPipelineChoice.fromId(json.optString("selectedPipeline", "DEPTH_MATTING_FUSION")) }.getOrDefault(AiPipelineChoice.DEPTH_MATTING_FUSION),
+            selectedPipeline = runCatching { AiPipelineChoice.fromId(json.optString("selectedPipeline", "MULTI_LAYER_DEPTH")) }.getOrDefault(AiPipelineChoice.MULTI_LAYER_DEPTH),
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),

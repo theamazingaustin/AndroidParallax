@@ -240,4 +240,61 @@ class CoreEnginesTest {
         assertTrue(baseModel.bestAt.isNotBlank())
         assertEquals("Apache 2.0 (100% Commercial Cleared)", baseModel.license)
     }
+
+    @Test
+    fun testRecommendedPipelinesRegisteredAndClassified() {
+        val recommended = AiPipelineChoice.entries.filter { it.isRecommended }
+        assertEquals(4, recommended.size)
+        assertTrue(recommended.contains(AiPipelineChoice.MULTI_LAYER_DEPTH))
+        assertTrue(recommended.contains(AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH))
+        assertTrue(recommended.contains(AiPipelineChoice.PURE_DEPTH_SMALL))
+        assertTrue(recommended.contains(AiPipelineChoice.CONTOUR_FOCUS_DEPTH))
+
+        val legacy = AiPipelineChoice.entries.filter { !it.isRecommended }
+        assertTrue(legacy.contains(AiPipelineChoice.DEPTH_MATTING_FUSION))
+        assertTrue(legacy.contains(AiPipelineChoice.SEMANTIC_PORTRAIT_HYBRID))
+        assertTrue(legacy.contains(AiPipelineChoice.MULTI_SCALE_ZOOM))
+        assertTrue(legacy.contains(AiPipelineChoice.PURE_DEPTH_3D))
+    }
+
+    @Test
+    fun testGenerateQuantizedLayerMaskDiscreteGrouping() {
+        val w = 10
+        val h = 10
+        // Continuous gradient from 0.0 to 1.0
+        val depth = FloatArray(w * h) { i -> i.toFloat() / (w * h - 1) }
+
+        // Test Full Z-Axis Freedom bounds:
+        // clockZDepth <= 0.001 -> foreground covers everything
+        val (allFg, _, _) = SegmentationEngine.generateQuantizedLayerMask(depth, w, h, layerCount = 8, clockZDepth = 0.0f)
+        for (v in allFg) assertEquals(1.0f, v, 0.001f)
+
+        // clockZDepth >= 0.999 -> foreground is completely empty (clock in front of everything)
+        val (noFg, _, _) = SegmentationEngine.generateQuantizedLayerMask(depth, w, h, layerCount = 8, clockZDepth = 1.0f)
+        for (v in noFg) assertEquals(0.0f, v, 0.001f)
+
+        // 8 layers slicing at midpoint z=0.50
+        val (midFg, _, _) = SegmentationEngine.generateQuantizedLayerMask(depth, w, h, layerCount = 8, clockZDepth = 0.50f)
+        // Pixels with depth near 0.1 should be background (0.0f)
+        assertEquals(0.0f, midFg[10], 0.001f)
+        // Pixels with depth near 0.9 should be foreground (1.0f)
+        assertEquals(1.0f, midFg[90], 0.001f)
+    }
+
+    @Test
+    fun testWallpaperProjectDepthLayerCountDefaults() {
+        val defaultProject = com.example.depthpaper.data.WallpaperProject(
+            title = "Default Slicing"
+        )
+        assertEquals(8, defaultProject.depthLayerCount)
+        assertEquals(0.50f, defaultProject.clockZDepth, 0.001f)
+        assertEquals(AiPipelineChoice.MULTI_LAYER_DEPTH, defaultProject.selectedPipeline)
+
+        val customProject = defaultProject.copy(
+            depthLayerCount = 16,
+            clockZDepth = 0.72f
+        )
+        assertEquals(16, customProject.depthLayerCount)
+        assertEquals(0.72f, customProject.clockZDepth, 0.001f)
+    }
 }
