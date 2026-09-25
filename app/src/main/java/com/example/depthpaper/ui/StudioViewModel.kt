@@ -191,8 +191,9 @@ class StudioViewModel(
                 threshold = 0.50f,
                 edgeFeathering = 6,
                 maskExpansion = 0,
-                inpaintRadius = 6,
-                processingMode = ProcessingMode.SINGLE_MODEL,
+                inpaintRadius = 0,
+                processingMode = ProcessingMode.PIPELINE,
+                pipelineChoice = AiPipelineChoice.UNIVERSAL_CASCADE,
                 modelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
                 clockZDepth = 0.50f
             )
@@ -200,7 +201,8 @@ class StudioViewModel(
             val newProject = WallpaperProject(
                 title = title,
                 renderMode = RenderMode.LAYERED_2D,
-                processingMode = ProcessingMode.SINGLE_MODEL,
+                processingMode = ProcessingMode.PIPELINE,
+                selectedPipeline = AiPipelineChoice.UNIVERSAL_CASCADE,
                 selectedModel = AiModelChoice.DEPTH_ANYTHING_V2,
                 clockZDepth = 0.50f,
                 isActive = true
@@ -218,18 +220,7 @@ class StudioViewModel(
                 DepthSlicingEngine.createGrayscaleDepthBitmap(result.normalizedDepth, result.depthWidth, result.depthHeight)
             } else null
 
-            // Initial slice at clockZDepth = 0.50f
-            val initialCutout = if (result.normalizedDepth != null) {
-                DepthSlicingEngine.sliceForegroundCutout(
-                    sourceBmp = safeWorkingBmp,
-                    normalizedDepth = result.normalizedDepth,
-                    depthWidth = result.depthWidth,
-                    depthHeight = result.depthHeight,
-                    clockZDepth = 0.50f
-                )
-            } else {
-                result.foregroundCutout
-            }
+            val initialCutout = result.foregroundCutout
 
             val saved = repository.saveProject(
                 project = newProject,
@@ -282,15 +273,13 @@ class StudioViewModel(
                 holeFillingRadius = cur.holeFillingRadius
             )
 
-            val detectedMode = if (result.isPortraitDetected) RenderMode.LAYERED_2D else RenderMode.SPATIAL_3D
-
             val thumbScale = 480f / maxOf(bitmap.width, bitmap.height)
             val thumbW = if (thumbScale < 1f) (bitmap.width * thumbScale).toInt() else bitmap.width
             val thumbH = if (thumbScale < 1f) (bitmap.height * thumbScale).toInt() else bitmap.height
             val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
 
             val updated = cur.copy(
-                renderMode = detectedMode
+                renderMode = RenderMode.LAYERED_2D
             )
 
             val rawDepthBmp = if (result.normalizedDepth != null) {
@@ -300,17 +289,7 @@ class StudioViewModel(
                 DepthSlicingEngine.createGrayscaleDepthBitmap(result.normalizedDepth, result.depthWidth, result.depthHeight)
             } else null
 
-            val initialCutout = if (result.normalizedDepth != null) {
-                DepthSlicingEngine.sliceForegroundCutout(
-                    sourceBmp = bitmap,
-                    normalizedDepth = result.normalizedDepth,
-                    depthWidth = result.depthWidth,
-                    depthHeight = result.depthHeight,
-                    clockZDepth = cur.clockZDepth
-                )
-            } else {
-                result.foregroundCutout
-            }
+            val initialCutout = result.foregroundCutout
 
             val saved = repository.saveProject(
                 project = updated,
@@ -335,15 +314,6 @@ class StudioViewModel(
                 refreshProjectsList()
             }
         }
-    }
-
-    fun toggleRenderMode() {
-        val cur = _uiState.value.currentProject
-        val newMode = if (cur.renderMode == RenderMode.LAYERED_2D) RenderMode.SPATIAL_3D else RenderMode.LAYERED_2D
-        val updated = cur.copy(renderMode = newMode)
-        repository.saveProjectMetaOnly(updated)
-        _uiState.value = _uiState.value.copy(currentProject = updated)
-        refreshProjectsList()
     }
 
     fun setPreviewSurface(surface: PreviewSurface) {
@@ -526,17 +496,7 @@ class StudioViewModel(
                 DepthSlicingEngine.createGrayscaleDepthBitmap(result.normalizedDepth, result.depthWidth, result.depthHeight)
             } else null
 
-            val initialCutout = if (result.normalizedDepth != null && _uiState.value.sourceBitmap != null) {
-                DepthSlicingEngine.sliceForegroundCutout(
-                    sourceBmp = _uiState.value.sourceBitmap!!,
-                    normalizedDepth = result.normalizedDepth,
-                    depthWidth = result.depthWidth,
-                    depthHeight = result.depthHeight,
-                    clockZDepth = clockZDepth
-                )
-            } else {
-                result.foregroundCutout
-            }
+            val initialCutout = result.foregroundCutout
 
             val saved = repository.saveProject(
                 project = updatedMeta,

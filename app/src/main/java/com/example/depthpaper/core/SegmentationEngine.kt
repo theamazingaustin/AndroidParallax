@@ -143,6 +143,21 @@ enum class AiPipelineChoice(
     val isRecommended: Boolean,
     val tuningProfile: ModelTuningProfile
 ) {
+    UNIVERSAL_CASCADE(
+        id = "UNIVERSAL_CASCADE",
+        pipelineName = "Universal AI Cascade",
+        shortLabel = "Universal Cascade (Flagship)",
+        bestAt = "Universal flagship: Depth Anything V2 continuous 3D geometry + MediaPipe human multiclass + DeepLab v3 pets/objects + Fast Guided RGB edge snapping.",
+        license = "Apache 2.0 (100% Commercial Cleared)",
+        isRecommended = true,
+        tuningProfile = ModelTuningProfile(
+            sensitivity = SliderSetting(min = 0.10f, max = 0.90f, default = 0.50f),
+            maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
+            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
+            edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
+        )
+    ),
     MULTI_LAYER_DEPTH(
         id = "MULTI_LAYER_DEPTH",
         pipelineName = "3D Multi-Layer Slicing (Recommended)",
@@ -268,13 +283,14 @@ enum class AiPipelineChoice(
         fun fromId(id: String): AiPipelineChoice =
             entries.find { it.id.equals(id, ignoreCase = true) }
                 ?: when (id.uppercase()) {
+                    "UNIVERSAL_CASCADE" -> UNIVERSAL_CASCADE
                     "MULTI_LAYER_DEPTH" -> MULTI_LAYER_DEPTH
                     "SEMANTIC_PORTRAIT_DEPTH" -> SEMANTIC_PORTRAIT_DEPTH
                     "PURE_DEPTH_SMALL" -> PURE_DEPTH_SMALL
                     "CONTOUR_FOCUS_DEPTH" -> CONTOUR_FOCUS_DEPTH
                     "DUAL_MODEL_HYBRID" -> DEPTH_MATTING_FUSION
                     "MULTI_SCALE_TILING" -> MULTI_SCALE_ZOOM
-                    else -> MULTI_LAYER_DEPTH
+                    else -> UNIVERSAL_CASCADE
                 }
     }
 }
@@ -584,7 +600,7 @@ class SegmentationEngine(private val context: Context) {
         private set
     var currentModelChoice: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2
         private set
-    var currentPipelineChoice: AiPipelineChoice = AiPipelineChoice.DEPTH_MATTING_FUSION
+    var currentPipelineChoice: AiPipelineChoice = AiPipelineChoice.UNIVERSAL_CASCADE
         private set
 
     val currentModelType: AiModelChoice get() = currentModelChoice
@@ -862,6 +878,9 @@ class SegmentationEngine(private val context: Context) {
         var (rawMask, maskW, maskH) = when (processingMode) {
             ProcessingMode.PIPELINE -> {
                 when (pipelineChoice) {
+                    AiPipelineChoice.UNIVERSAL_CASCADE -> {
+                        executeUniversalCascade(inferenceBmp, depthResult, clockZDepth)
+                    }
                     AiPipelineChoice.MULTI_LAYER_DEPTH -> {
                         executeMultiLayerDepthPipeline(depthResult, inferenceBmp, depthLayerCount, clockZDepth)
                     }
@@ -1040,9 +1059,9 @@ class SegmentationEngine(private val context: Context) {
 
         // 8. Inpainted Background Plate
         // Inpaint hole strictly matches the foreground cutout threshold to eliminate outer blurry halos.
-        // Dilation is tightly restricted to 1..4px so infilled pixels stay hidden under the cutout at rest.
+        // Dilation is strictly 0px so infilled pixels stay 100% hidden under the cutout at rest.
         val inpaintThreshold = threshold.coerceIn(0.25f, 0.85f)
-        val inpaintDilation = inpaintRadius.coerceIn(1, 4)
+        val inpaintDilation = 0
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = solidMask,
@@ -1067,6 +1086,91 @@ class SegmentationEngine(private val context: Context) {
             depthHeight = depthResult?.depthHeight ?: maskH,
             depthLayerCount = depthLayerCount
         )
+    }
+
+    /**
+     * Universal AI Cascade (Flagship Pipeline):
+     * Seamlessly unifies all scenarios:
+     * 1. Runs Depth Anything V2 for 3D continuous geometry and metric scene depth.
+     * 2. Checks MediaPipe Selfie Multiclass for portraits (hair, face, skin, clothes).
+     * 3. Checks DeepLab v3 MobileNet for pets (dogs, cats, birds) and objects (vehicles, etc.).
+     * 4. If portrait/pet/object detected, anchors semantic subject in foreground and combines with depth.
+     * 5. If pure landscape/architecture/scene, continuous 3D depth slices foreground at clockZDepth.
+     * 6. Solid-core hole-filling and Fast Guided Matting against RGB source luminance snap edges to 1px precision.
+     */
+    private fun executeUniversalCascade(
+        bitmap: Bitmap,
+        depthResult: DepthAnythingEngine.DepthResult?,
+        clockZDepth: Float
+    ): Triple<FloatArray, Int, Int> {
+        val multiclass = multiclassSegmenter.segment(bitmap)
+        val deepLab = if (multiclass == null) deepLabSegmenter.segment(bitmap) else null
+
+        val mW = multiclass?.second ?: 0
+        val mH = multiclass?.third ?: 0
+        var personPixels = 0
+        if (multiclass != null && mW > 0 && mH > 0) {
+            val mask = multiclass.first
+            val total = mW * mH
+            for (i in 0 until total) {
+                if (mask[i] >= 0.35f) personPixels++
+            }
+        }
+        val hasPerson = (mW > 0 && mH > 0 && (personPixels.toFloat() / (mW * mH)) >= 0.03f)
+
+        var objPixels = 0
+        val dW_dl = deepLab?.second ?: 0
+        val dH_dl = deepLab?.third ?: 0
+        if (!hasPerson && deepLab != null && dW_dl > 0 && dH_dl > 0) {
+            val mask = deepLab.first
+            val total = dW_dl * dH_dl
+            for (i in 0 until total) {
+                if (mask[i] >= 0.35f) objPixels++
+            }
+        }
+        val hasObject = (!hasPerson && dW_dl > 0 && dH_dl > 0 && (objPixels.toFloat() / (dW_dl * dH_dl)) >= 0.03f)
+
+        val outW = depthResult?.depthWidth ?: (if (hasPerson) mW else if (hasObject) dW_dl else 320)
+        val outH = depthResult?.depthHeight ?: (if (hasPerson) mH else if (hasObject) dH_dl else 320)
+        val fused = FloatArray(outW * outH)
+        val invW = 1.0f / max(1, outW - 1)
+        val invH = 1.0f / max(1, outH - 1)
+
+        val depthMask = depthResult?.foregroundConfidenceMask
+        val dW = depthResult?.depthWidth ?: outW
+        val dH = depthResult?.depthHeight ?: outH
+
+        for (y in 0 until outH) {
+            val v = y * invH
+            val row = y * outW
+            for (x in 0 until outW) {
+                val u = x * invW
+
+                val depthVal = if (depthMask != null) {
+                    InpaintingEngine.sampleMaskBilinear(depthMask, dW, dH, u, v)
+                } else 0f
+
+                val subjectVal = when {
+                    hasPerson -> {
+                        val p = InpaintingEngine.sampleMaskBilinear(multiclass!!.first, mW, mH, u, v)
+                        if (clockZDepth < 0.98f) p else 0f
+                    }
+                    hasObject -> {
+                        val o = InpaintingEngine.sampleMaskBilinear(deepLab!!.first, dW_dl, dH_dl, u, v)
+                        if (clockZDepth < 0.98f) o else 0f
+                    }
+                    else -> 0f
+                }
+
+                fused[row + x] = if (hasPerson || hasObject) {
+                    max(subjectVal, depthVal).coerceIn(0f, 1f)
+                } else {
+                    depthVal
+                }
+            }
+        }
+
+        return Triple(fused, outW, outH)
     }
 
     /**

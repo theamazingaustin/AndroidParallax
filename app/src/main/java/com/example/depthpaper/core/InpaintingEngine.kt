@@ -57,7 +57,7 @@ object InpaintingEngine {
         maskWidth: Int,
         maskHeight: Int,
         threshold: Float = 0.5f,
-        dilationRadius: Int = 2
+        dilationRadius: Int = 0
     ): Bitmap {
         val w = sourceBmp.width
         val h = sourceBmp.height
@@ -293,65 +293,16 @@ object InpaintingEngine {
         }
         val pyramidL0 = levels[0]
 
-        // 4. Distance Transform for Continuous Cosine Boundary Feathering
-        val featherDist = 2
-        val distToValid = IntArray(w * h) { if (dilatedHole[it]) featherDist else 0 }
-
-        // Forward scan
+        // 4. Multi-Scale 2D Pyramid Inpainting (Zero horizontal streaking, pure background synthesis)
         for (y in 0 until h) {
             val row = y * w
             for (x in 0 until w) {
                 val idx = row + x
                 if (dilatedHole[idx]) {
-                    var d = featherDist
-                    if (x > 0) d = min(d, distToValid[row + x - 1] + 1)
-                    if (y > 0) d = min(d, distToValid[(y - 1) * w + x] + 1)
-                    distToValid[idx] = d
-                }
-            }
-        }
-        // Backward scan
-        for (y in h - 1 downTo 0) {
-            val row = y * w
-            for (x in w - 1 downTo 0) {
-                val idx = row + x
-                if (dilatedHole[idx]) {
-                    var d = distToValid[idx]
-                    if (x < w - 1) d = min(d, distToValid[row + x + 1] + 1)
-                    if (y < h - 1) d = min(d, distToValid[(y + 1) * w + x] + 1)
-                    distToValid[idx] = d
-                }
-            }
-        }
-
-        // 5. Multi-Scale 2D Pyramid Inpainting with Cosine Boundary Feathering (Zero horizontal streaking)
-        for (y in 0 until h) {
-            val row = y * w
-            for (x in 0 until w) {
-                val idx = row + x
-                if (dilatedHole[idx]) {
-                    val infilledR = pyramidL0.r[idx]
-                    val infilledG = pyramidL0.g[idx]
-                    val infilledB = pyramidL0.b[idx]
-
-                    // Cosine Seam Feathering at boundary (d in 1..featherDist)
-                    val d = distToValid[idx]
-                    val alpha = if (d >= featherDist) {
-                        1.0f
-                    } else {
-                        (0.5f - 0.5f * cos(Math.PI * d / featherDist)).toFloat()
-                    }
-
-                    val orig = pixels[idx]
-                    val origR = ((orig shr 16) and 0xFF).toFloat()
-                    val origG = ((orig shr 8) and 0xFF).toFloat()
-                    val origB = (orig and 0xFF).toFloat()
-
-                    val finalR = ((1f - alpha) * origR + alpha * infilledR).toInt().coerceIn(0, 255)
-                    val finalG = ((1f - alpha) * origG + alpha * infilledG).toInt().coerceIn(0, 255)
-                    val finalB = ((1f - alpha) * origB + alpha * infilledB).toInt().coerceIn(0, 255)
-
-                    pixels[idx] = (0xFF shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
+                    val infilledR = pyramidL0.r[idx].toInt().coerceIn(0, 255)
+                    val infilledG = pyramidL0.g[idx].toInt().coerceIn(0, 255)
+                    val infilledB = pyramidL0.b[idx].toInt().coerceIn(0, 255)
+                    pixels[idx] = (0xFF shl 24) or (infilledR shl 16) or (infilledG shl 8) or infilledB
                 }
             }
         }

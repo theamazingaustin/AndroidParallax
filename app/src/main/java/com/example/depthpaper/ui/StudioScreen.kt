@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import kotlin.math.abs
 import kotlin.math.max
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -39,6 +41,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -186,30 +192,11 @@ fun StudioScreen(
                     )
                 }
 
-                // Render Mode chip
-                FilterChip(
-                    selected = true,
-                    onClick = { viewModel.toggleRenderMode() },
-                    label = {
-                        Text(
-                            text = if (state.currentProject.renderMode == RenderMode.LAYERED_2D) "2.5D Layered" else "3D Perspective",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            if (state.currentProject.renderMode == RenderMode.LAYERED_2D) Icons.Default.Layers else Icons.Default.ViewInAr,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = if (state.currentProject.renderMode == RenderMode.LAYERED_2D) Color(0xFF6C5CE7) else Color(0xFF00B894),
-                        selectedLabelColor = Color.White,
-                        selectedLeadingIconColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                Text(
+                    text = "DepthPaper Studio",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -248,70 +235,87 @@ fun StudioScreen(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxHeight(0.96f)
-                    .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
-                    .clip(RoundedCornerShape(26.dp))
-                    .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
-                    .background(Color.Black)
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                ParallaxViewport(
-                    project = state.currentProject,
-                    previewSurface = state.previewSurface,
-                    sourceBmp = state.sourceBitmap,
-                    cutoutBmp = state.cutoutBitmap,
-                    backgroundBmp = state.backgroundBitmap,
-                    depthBmp = state.depthBitmap,
-                    simulatedTiltX = state.simulatedTiltX,
-                    simulatedTiltY = state.simulatedTiltY,
-                    onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
-                    onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
-                    onImageTransformChanged = { scale, panX, panY ->
-                        viewModel.updateImageTransform(scale, panX, panY)
-                    },
-                    onTapDepthPoint = { normX, normY ->
-                        viewModel.onTapPreviewCoordinate(normX, normY)
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
+                        .clip(RoundedCornerShape(26.dp))
+                        .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
+                        .background(Color.Black)
+                ) {
+                    ParallaxViewport(
+                        project = state.currentProject,
+                        previewSurface = state.previewSurface,
+                        sourceBmp = state.sourceBitmap,
+                        cutoutBmp = state.cutoutBitmap,
+                        backgroundBmp = state.backgroundBitmap,
+                        depthBmp = state.depthBitmap,
+                        simulatedTiltX = state.simulatedTiltX,
+                        simulatedTiltY = state.simulatedTiltY,
+                        onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
+                        onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
+                        onImageTransformChanged = { scale, panX, panY ->
+                            viewModel.updateImageTransform(scale, panX, panY)
+                        },
+                        onTapDepthPoint = { normX, normY ->
+                            viewModel.onTapPreviewCoordinate(normX, normY)
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-                // Processing overlay
-                if (state.isProcessing) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.65f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = state.statusMessage ?: "AI processing on-device...",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                    // Processing overlay
+                    if (state.isProcessing) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.65f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = state.statusMessage ?: "AI processing on-device...",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
+                    }
+
+                    // Drag hint pill at bottom of viewport
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Text(
+                            text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
                     }
                 }
 
-                // Drag hint pill at bottom of viewport
-                Surface(
-                    color = Color.Black.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 12.dp)
-                ) {
-                    Text(
-                        text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Vertical Clock Z Slider beside preview
+                VerticalClockZSlider(
+                    clockZDepth = state.currentProject.clockZDepth,
+                    onZDepthChanged = { viewModel.onClockZDepthChanged(it) },
+                    modifier = Modifier.fillMaxHeight(0.60f)
+                )
             }
         }
     }
@@ -629,102 +633,58 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
         }
 
 
-        // 3. AI Segmentation Models
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("AI Segmentation Model", fontSize = 12.sp, color = Color.Gray)
-
-            AiModelChoice.entries.forEach { model ->
-                val isSelected = processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == model
-                val isFlagship = model == AiModelChoice.SELFIE_MULTICLASS || model == AiModelChoice.DEEPLAB_V3
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) Color(0xFF1B2236) else Color(0xFF161624)
-                    ),
-                    border = BorderStroke(
-                        width = if (isSelected) 1.5.dp else 1.dp,
-                        color = if (isSelected) Color(0xFF7C4DFF) else Color(0xFF28283E)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedModel = model
-                            processingMode = ProcessingMode.SINGLE_MODEL
-                            val prof = model.tuningProfile
-                            threshold = prof.sensitivity.default
-                            maskExpansion = prof.maskMargin.default.toInt()
-                            cutoutContrast = prof.layerFlatness.default
-                            feathering = prof.edgeSoftness.default.toInt()
-                            inpaintRadius = prof.inpaintFill.default.toInt()
-                            viewModel.onTuningChanged(
-                                threshold = threshold,
-                                feathering = feathering,
-                                maskExpansion = maskExpansion,
-                                inpaintRadius = inpaintRadius,
-                                modelType = model,
-                                cutoutContrast = cutoutContrast,
-                                processingMode = ProcessingMode.SINGLE_MODEL,
-                                pipelineChoice = selectedPipeline,
-                                clockZDepth = clockZDepth,
-                                depthPlaneOffset = depthPlaneOffset,
-                                fusionBalance = fusionBalance,
-                                enableHoleFilling = enableHoleFilling,
-                                holeFillingRadius = holeFillingRadius,
-                                depthLayerCount = depthLayers,
-                                debounceMs = 0L
-                            )
-                        }
+        // 2. Universal AI Cascade Flagship Hero Card
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xFF1B2236)
+            ),
+            border = BorderStroke(1.5.dp, Color(0xFF00E5FF)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFF7C4DFF) else Color(0xFF4A4A65))
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = model.modelName,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) Color(0xFFB388FF) else Color.White
-                                )
-                            }
-                            if (isFlagship) {
-                                Surface(
-                                    color = Color(0xFF7C4DFF).copy(alpha = 0.20f),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = if (model == AiModelChoice.SELFIE_MULTICLASS) "PORTRAIT FLAGSHIP" else "MULTI-OBJECT",
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFB388FF),
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E5FF))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = model.bestAt,
-                            fontSize = 11.sp,
-                            color = Color(0xFFB0B0C4),
-                            lineHeight = 14.sp
+                            text = "Universal AI Cascade",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Surface(
+                        color = Color(0xFF00E5FF).copy(alpha = 0.20f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "ACTIVE PIPELINE",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00E5FF),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
+                Text(
+                    text = "Depth Anything V2 3D continuous geometry + MediaPipe human multiclass + DeepLab v3 pets/objects + Fast Guided RGB edge snapping.",
+                    fontSize = 11.sp,
+                    color = Color(0xFFB0B0C4),
+                    lineHeight = 15.sp
+                )
             }
         }
 
@@ -919,5 +879,131 @@ private fun getFontFamilyAndWeight(style: ClockFontStyle): Pair<FontFamily, Font
         ClockFontStyle.ELEGANT_THIN -> FontFamily.SansSerif to FontWeight.Light
         ClockFontStyle.STENCIL_DISPLAY -> FontFamily.Cursive to FontWeight.Bold
         ClockFontStyle.CYBER_MONO -> FontFamily.Monospace to FontWeight.Bold
+    }
+}
+
+/**
+ * Vertical Touch & Drag Clock Z-Depth Slider.
+ * Rendered directly beside the phone preview frame so depth layering can be adjusted
+ * live while viewing the full wallpaper preview.
+ */
+@Composable
+fun VerticalClockZSlider(
+    clockZDepth: Float,
+    onZDepthChanged: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var trackHeightPx by remember { mutableFloatStateOf(1f) }
+
+    Column(
+        modifier = modifier
+            .width(44.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF141422).copy(alpha = 0.85f))
+            .border(1.dp, Color(0xFF28283E), RoundedCornerShape(16.dp))
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Top: Near / Front
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Default.Layers,
+                contentDescription = null,
+                tint = Color(0xFF00E5FF),
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = "FRONT",
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF00E5FF)
+            )
+        }
+
+        // Vertical Slider Track
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .width(28.dp)
+                .padding(vertical = 6.dp)
+                .onSizeChanged { size ->
+                    trackHeightPx = size.height.toFloat().coerceAtLeast(1f)
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        val fraction = (1f - (offset.y / trackHeightPx)).coerceIn(0f, 1f)
+                        onZDepthChanged(fraction)
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        change.consume()
+                        val fraction = (1f - (change.position.y / trackHeightPx)).coerceIn(0f, 1f)
+                        onZDepthChanged(fraction)
+                    }
+                },
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            // Track background groove
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF1E1E2E))
+                    .border(1.dp, Color(0xFF2E2E44), RoundedCornerShape(4.dp))
+            )
+
+            // Active filled track (from bottom up to clockZDepth)
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight(clockZDepth.coerceIn(0.01f, 1f))
+                    .width(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
+                        )
+                    )
+            )
+
+            // Draggable Thumb Handle with live percentage
+            val thumbOffsetY = ((1f - clockZDepth.coerceIn(0f, 1f)) * (trackHeightPx - 24f)).coerceAtLeast(0f)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer {
+                        translationY = thumbOffsetY
+                    }
+                    .size(width = 28.dp, height = 24.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF00E5FF))
+                    .border(1.5.dp, Color.White, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${(clockZDepth * 100).toInt()}%",
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Black
+                )
+            }
+        }
+
+        // Bottom: Far / Back
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "BACK",
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.LightGray
+            )
+            Text(
+                text = "Z-Axis",
+                fontSize = 7.sp,
+                color = Color.Gray
+            )
+        }
     }
 }

@@ -244,7 +244,8 @@ class CoreEnginesTest {
     @Test
     fun testRecommendedPipelinesRegisteredAndClassified() {
         val recommended = AiPipelineChoice.entries.filter { it.isRecommended }
-        assertEquals(4, recommended.size)
+        assertEquals(5, recommended.size)
+        assertTrue(recommended.contains(AiPipelineChoice.UNIVERSAL_CASCADE))
         assertTrue(recommended.contains(AiPipelineChoice.MULTI_LAYER_DEPTH))
         assertTrue(recommended.contains(AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH))
         assertTrue(recommended.contains(AiPipelineChoice.PURE_DEPTH_SMALL))
@@ -288,7 +289,7 @@ class CoreEnginesTest {
         )
         assertEquals(8, defaultProject.depthLayerCount)
         assertEquals(0.50f, defaultProject.clockZDepth, 0.001f)
-        assertEquals(AiPipelineChoice.MULTI_LAYER_DEPTH, defaultProject.selectedPipeline)
+        assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, defaultProject.selectedPipeline)
 
         val customProject = defaultProject.copy(
             depthLayerCount = 16,
@@ -296,5 +297,14 @@ class CoreEnginesTest {
         )
         assertEquals(16, customProject.depthLayerCount)
         assertEquals(0.72f, customProject.clockZDepth, 0.001f)
+    }
+
+    @Test
+    fun testUniversalCascadePipelineProperties() {
+        val cascade = AiPipelineChoice.UNIVERSAL_CASCADE
+        assertEquals("UNIVERSAL_CASCADE", cascade.id)
+        assertTrue(cascade.isRecommended)
+        assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("anything_unknown"))
+        assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("UNIVERSAL_CASCADE"))
     }
 }

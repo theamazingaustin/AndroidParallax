@@ -721,7 +721,7 @@ fun LockScreenPreviewCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (project.renderMode == RenderMode.LAYERED_2D) "2.5D Layer" else "3D Depth",
+                                text = "Universal 3D Depth",
                                 fontSize = 7.sp,
                                 color = Color(0xFF00E5FF)
                             )
