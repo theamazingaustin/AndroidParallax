@@ -291,68 +291,7 @@ object InpaintingEngine {
         }
         val pyramidL0 = levels[0]
 
-        // 4. Bidirectional Horizontal Isophote Bridging + High-Frequency Wave & Surface Texture Synthesis
-        val horizR = FloatArray(w * h)
-        val horizG = FloatArray(w * h)
-        val horizB = FloatArray(w * h)
-        val hasHoriz = BooleanArray(w * h)
-
-        for (y in 0 until h) {
-            val row = y * w
-            var x = 0
-            while (x < w) {
-                if (dilatedHole[row + x]) {
-                    val startX = x
-                    while (x < w && dilatedHole[row + x]) {
-                        x++
-                    }
-                    val endX = x - 1
-
-                    // Left anchor
-                    val leftX = startX - 1
-                    val hasLeft = leftX >= 0 && !dilatedHole[row + leftX]
-                    val leftCol = if (hasLeft) pixels[row + leftX] else 0
-
-                    // Right anchor
-                    val rightX = endX + 1
-                    val hasRight = rightX < w && !dilatedHole[row + rightX]
-                    val rightCol = if (hasRight) pixels[row + rightX] else 0
-
-                    if (hasLeft || hasRight) {
-                        val lr = if (hasLeft) ((leftCol shr 16) and 0xFF).toFloat() else 0f
-                        val lg = if (hasLeft) ((leftCol shr 8) and 0xFF).toFloat() else 0f
-                        val lb = if (hasLeft) (leftCol and 0xFF).toFloat() else 0f
-
-                        val rr = if (hasRight) ((rightCol shr 16) and 0xFF).toFloat() else 0f
-                        val rg = if (hasRight) ((rightCol shr 8) and 0xFF).toFloat() else 0f
-                        val rb = if (hasRight) (rightCol and 0xFF).toFloat() else 0f
-
-                        val spanLen = (endX - startX + 1).coerceAtLeast(1)
-
-                        for (hx in startX..endX) {
-                            val idx = row + hx
-                            val t = if (hasLeft && hasRight) {
-                                (hx - startX).toFloat() / spanLen.toFloat()
-                            } else if (hasLeft) 0f else 1f
-
-                            // Interpolated base isophote color
-                            val baseR = if (hasLeft && hasRight) (1f - t) * lr + t * rr else if (hasLeft) lr else rr
-                            val baseG = if (hasLeft && hasRight) (1f - t) * lg + t * rg else if (hasLeft) lg else rg
-                            val baseB = if (hasLeft && hasRight) (1f - t) * lb + t * rb else if (hasLeft) lb else rb
-
-                            horizR[idx] = baseR
-                            horizG[idx] = baseG
-                            horizB[idx] = baseB
-                            hasHoriz[idx] = true
-                        }
-                    }
-                } else {
-                    x++
-                }
-            }
-        }
-
-        // 5. Distance Transform for Continuous Cosine Boundary Feathering
+        // 4. Distance Transform for Continuous Cosine Boundary Feathering
         val featherDist = 6
         val distToValid = IntArray(w * h) { if (dilatedHole[it]) featherDist else 0 }
 
@@ -383,28 +322,15 @@ object InpaintingEngine {
             }
         }
 
-        // 6. Directional-Pyramid Blending & Cosine Feathered Output
+        // 5. Multi-Scale 2D Pyramid Inpainting with Cosine Boundary Feathering (Zero horizontal streaking)
         for (y in 0 until h) {
             val row = y * w
             for (x in 0 until w) {
                 val idx = row + x
                 if (dilatedHole[idx]) {
-                    // Hybrid infilled color: 50% Smooth Horizontal Structure + 50% Multi-Scale Pyramid Shading
-                    val infilledR = if (hasHoriz[idx]) {
-                        0.50f * horizR[idx] + 0.50f * pyramidL0.r[idx]
-                    } else {
-                        pyramidL0.r[idx]
-                    }
-                    val infilledG = if (hasHoriz[idx]) {
-                        0.50f * horizG[idx] + 0.50f * pyramidL0.g[idx]
-                    } else {
-                        pyramidL0.g[idx]
-                    }
-                    val infilledB = if (hasHoriz[idx]) {
-                        0.50f * horizB[idx] + 0.50f * pyramidL0.b[idx]
-                    } else {
-                        pyramidL0.b[idx]
-                    }
+                    val infilledR = pyramidL0.r[idx]
+                    val infilledG = pyramidL0.g[idx]
+                    val infilledB = pyramidL0.b[idx]
 
                     // Cosine Seam Feathering at boundary (d in 1..featherDist)
                     val d = distToValid[idx]

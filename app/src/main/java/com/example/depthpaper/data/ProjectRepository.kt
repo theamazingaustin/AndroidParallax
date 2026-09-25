@@ -80,6 +80,7 @@ class ProjectRepository(private val context: Context) {
         cutoutBmp: Bitmap? = null,
         inpaintedBgBmp: Bitmap? = null,
         depthBmp: Bitmap? = null,
+        rawDepthBmp: Bitmap? = null,
         thumbBmp: Bitmap? = null
     ): WallpaperProject {
         val dir = File(projectsDir, project.id).apply { if (!exists()) mkdirs() }
@@ -110,6 +111,10 @@ class ProjectRepository(private val context: Context) {
             saveBitmap(it, f)
             depthPath = f.absolutePath
         }
+        rawDepthBmp?.let {
+            val f = File(dir, "depth_raw.png")
+            saveBitmap(it, f)
+        }
         thumbBmp?.let {
             val f = File(dir, "thumbnail.png")
             saveBitmap(it, f)
@@ -133,6 +138,20 @@ class ProjectRepository(private val context: Context) {
         }
 
         return updated
+    }
+
+    fun saveCutoutOnly(projectId: String, cutoutBmp: Bitmap): String? {
+        val dir = File(projectsDir, projectId)
+        if (!dir.exists()) dir.mkdirs()
+        val f = File(dir, "cutout.png")
+        saveBitmap(cutoutBmp, f)
+        return f.absolutePath
+    }
+
+    fun loadRawDepthBitmap(projectId: String): Bitmap? {
+        val f = File(File(projectsDir, projectId), "depth_raw.png")
+        if (!f.exists()) return null
+        return BitmapFactory.decodeFile(f.absolutePath)
     }
 
     fun saveProjectMetaOnly(project: WallpaperProject) {

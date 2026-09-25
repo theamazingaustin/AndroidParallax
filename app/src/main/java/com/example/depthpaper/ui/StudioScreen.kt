@@ -731,8 +731,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
 
             // Clock Z-Position Slider with Full Z-Axis Freedom [0.0, 1.0] and 60 FPS live reactivity
             val zDisplay = when {
-                clockZDepth <= 0.01f -> "0% (Behind Subject)"
-                clockZDepth >= 0.99f -> "100% (In Front of Subject)"
+                clockZDepth <= 0.01f -> "0% (Fully Covered / Behind Scene)"
+                clockZDepth >= 0.99f -> "100% (Above Entire Scene)"
                 else -> "${(clockZDepth * 100).toInt()}%"
             }
             TuningSliderWithDefaultIndicator(
@@ -745,7 +745,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 valueRange = 0.0f..1.0f,
                 recommendedValue = 0.50f,
                 displayValue = zDisplay,
-                description = "Full Z-axis freedom: layers clock anywhere from behind the foreground subject (0%) to in front of all elements (100%). Drag to adjust depth with 60 FPS live reactivity."
+                description = "Continuous 3D depth positioning: adjust clock from fully covered behind the farthest depth (0%) to above the entire photo (100%). Drag to slide between subjects and background."
             )
 
 
