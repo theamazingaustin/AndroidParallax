@@ -671,128 +671,13 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 3. AI Processing Engine (Recommended Pipelines, Standalone Models, Legacy Workflows)
+        // 3. AI Segmentation Models
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("AI Processing Engine", fontSize = 12.sp, color = Color.Gray)
-
-            // Section 3A: Recommended 3D Depth Pipelines (Separated & Promoted)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF00E5FF).copy(alpha = 0.5f)))
-                Text(
-                    "  RECOMMENDED 3D DEPTH WORKFLOWS  ",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF00E5FF)
-                )
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF00E5FF).copy(alpha = 0.5f)))
-            }
-
-            AiPipelineChoice.entries.filter { it.isRecommended }.forEach { pipeline ->
-                val isSelected = processingMode == ProcessingMode.PIPELINE && selectedPipeline == pipeline
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) Color(0xFF132A36) else Color(0xFF161624)
-                    ),
-                    border = BorderStroke(
-                        width = if (isSelected) 1.5.dp else 1.dp,
-                        color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF28283E)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedPipeline = pipeline
-                            processingMode = ProcessingMode.PIPELINE
-                            val prof = pipeline.tuningProfile
-                            threshold = prof.sensitivity.default
-                            maskExpansion = prof.maskMargin.default.toInt()
-                            cutoutContrast = prof.layerFlatness.default
-                            feathering = prof.edgeSoftness.default.toInt()
-                            inpaintRadius = prof.inpaintFill.default.toInt()
-                            viewModel.onTuningChanged(
-                                threshold = threshold,
-                                feathering = feathering,
-                                maskExpansion = maskExpansion,
-                                inpaintRadius = inpaintRadius,
-                                modelType = selectedModel,
-                                cutoutContrast = cutoutContrast,
-                                processingMode = ProcessingMode.PIPELINE,
-                                pipelineChoice = pipeline,
-                                clockZDepth = clockZDepth,
-                                depthPlaneOffset = depthPlaneOffset,
-                                fusionBalance = fusionBalance,
-                                enableHoleFilling = enableHoleFilling,
-                                holeFillingRadius = holeFillingRadius,
-                                depthLayerCount = depthLayers,
-                                debounceMs = 0L
-                            )
-                        }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFF00E5FF) else Color(0xFF4A4A65))
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = pipeline.pipelineName,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) Color(0xFF00E5FF) else Color.White
-                                )
-                            }
-                            Surface(
-                                color = Color(0xFF00E5FF).copy(alpha = 0.20f),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "RECOMMENDED",
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00E5FF),
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = pipeline.bestAt,
-                            fontSize = 11.sp,
-                            color = Color(0xFFB0B0C4),
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-            }
-
-            // Section 3B: Standalone AI Models
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
-                Text(
-                    "  STANDALONE AI MODELS  ",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFA29BFE)
-                )
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
-            }
+            Text("AI Segmentation Model", fontSize = 12.sp, color = Color.Gray)
 
             AiModelChoice.entries.forEach { model ->
                 val isSelected = processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == model
+                val isFlagship = model == AiModelChoice.SELFIE_MULTICLASS || model == AiModelChoice.DEEPLAB_V3
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = if (isSelected) Color(0xFF1B2236) else Color(0xFF161624)
@@ -859,12 +744,20 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                     color = if (isSelected) Color(0xFFB388FF) else Color.White
                                 )
                             }
-                            Text(
-                                text = model.shortLabel,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.Gray
-                            )
+                            if (isFlagship) {
+                                Surface(
+                                    color = Color(0xFF7C4DFF).copy(alpha = 0.20f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = if (model == AiModelChoice.SELFIE_MULTICLASS) "PORTRAIT FLAGSHIP" else "MULTI-OBJECT",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFB388FF),
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
                         }
                         Text(
                             text = model.bestAt,
@@ -875,153 +768,19 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     }
                 }
             }
-
-            // Section 3C: Legacy Workflows (Preserved)
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
-                Text(
-                    "  LEGACY WORKFLOWS (PRESERVED)  ",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Gray
-                )
-                Box(modifier = Modifier.weight(1f).height(1.dp).background(Color(0xFF2E2E4A)))
-            }
-
-            AiPipelineChoice.entries.filter { !it.isRecommended }.forEach { pipeline ->
-                val isSelected = processingMode == ProcessingMode.PIPELINE && selectedPipeline == pipeline
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) Color(0xFF24201A) else Color(0xFF161624)
-                    ),
-                    border = BorderStroke(
-                        width = if (isSelected) 1.5.dp else 1.dp,
-                        color = if (isSelected) Color(0xFFFFB74D) else Color(0xFF28283E)
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            selectedPipeline = pipeline
-                            processingMode = ProcessingMode.PIPELINE
-                            val prof = pipeline.tuningProfile
-                            threshold = prof.sensitivity.default
-                            maskExpansion = prof.maskMargin.default.toInt()
-                            cutoutContrast = prof.layerFlatness.default
-                            feathering = prof.edgeSoftness.default.toInt()
-                            inpaintRadius = prof.inpaintFill.default.toInt()
-                            viewModel.onTuningChanged(
-                                threshold = threshold,
-                                feathering = feathering,
-                                maskExpansion = maskExpansion,
-                                inpaintRadius = inpaintRadius,
-                                modelType = selectedModel,
-                                cutoutContrast = cutoutContrast,
-                                processingMode = ProcessingMode.PIPELINE,
-                                pipelineChoice = pipeline,
-                                clockZDepth = clockZDepth,
-                                depthPlaneOffset = depthPlaneOffset,
-                                fusionBalance = fusionBalance,
-                                enableHoleFilling = enableHoleFilling,
-                                holeFillingRadius = holeFillingRadius,
-                                depthLayerCount = depthLayers,
-                                debounceMs = 0L
-                            )
-                        }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFFFFB74D) else Color(0xFF4A4A65))
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = pipeline.pipelineName,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) Color(0xFFFFB74D) else Color.White
-                                )
-                            }
-                            Surface(
-                                color = Color(0xFFFFB74D).copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "LEGACY",
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFFFB74D),
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = pipeline.bestAt,
-                            fontSize = 11.sp,
-                            color = Color(0xFFB0B0C4),
-                            lineHeight = 14.sp
-                        )
-                    }
-                }
-            }
         }
 
         // 4. Granular AI Tuning Controls with Model-Specific Dynamic Sliders
-        val isDepthModel = (processingMode == ProcessingMode.SINGLE_MODEL && (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2 || selectedModel == AiModelChoice.DEPTH_ANYTHING_V2_BASE)) ||
-                           (processingMode == ProcessingMode.PIPELINE && (
-                               selectedPipeline == AiPipelineChoice.MULTI_LAYER_DEPTH ||
-                               selectedPipeline == AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH ||
-                               selectedPipeline == AiPipelineChoice.PURE_DEPTH_SMALL ||
-                               selectedPipeline == AiPipelineChoice.CONTOUR_FOCUS_DEPTH ||
-                               selectedPipeline == AiPipelineChoice.PURE_DEPTH_3D
-                           ))
-        val isFusionPipeline = processingMode == ProcessingMode.PIPELINE && (
-            selectedPipeline == AiPipelineChoice.DEPTH_MATTING_FUSION ||
-            selectedPipeline == AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH
-        )
+        val isDepthModel = (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2 || selectedModel == AiModelChoice.DEPTH_ANYTHING_V2_BASE)
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Granular AI Tuning (Auto-Reprocesses Live)", fontSize = 12.sp, color = Color.Gray)
 
-            // 3D Depth Layers Quantization Slider
-            if (isDepthModel) {
-                TuningSliderWithDefaultIndicator(
-                    title = "Depth Layers (Quantization)",
-                    value = depthLayers.toFloat(),
-                    onValueChange = {
-                        val newCount = it.toInt()
-                        depthLayers = newCount
-                        viewModel.updateDepthLayerCount(newCount)
-                    },
-                    valueRange = 2f..20f,
-                    recommendedValue = 8f,
-                    steps = 17,
-                    displayValue = "$depthLayers layers",
-                    description = "Groups similar-depth areas together into cohesive 3D planes ($depthLayers layers). Drag left to group foreground/midground into solid planes; drag right for fine depth slicing."
-                )
-            }
-
             // Clock Z-Position Slider with Full Z-Axis Freedom [0.0, 1.0] and 60 FPS live reactivity
-            val currentLayer = (clockZDepth * depthLayers).toInt().coerceIn(0, depthLayers - 1) + 1
             val zDisplay = when {
-                clockZDepth <= 0.01f -> "0% (Behind Everything)"
-                clockZDepth >= 0.99f -> "100% (In Front of Everything)"
-                else -> "${(clockZDepth * 100).toInt()}% (Layer $currentLayer of $depthLayers)"
+                clockZDepth <= 0.01f -> "0% (Behind Subject)"
+                clockZDepth >= 0.99f -> "100% (In Front of Subject)"
+                else -> "${(clockZDepth * 100).toInt()}%"
             }
             TuningSliderWithDefaultIndicator(
                 title = "Clock Z-Position",
@@ -1033,7 +792,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                 valueRange = 0.0f..1.0f,
                 recommendedValue = 0.50f,
                 displayValue = zDisplay,
-                description = "Full Z-axis freedom: layers clock anywhere from behind the deepest mountain (0%) to in front of all foreground elements (100%). Tap any point in the preview above to snap the clock behind it."
+                description = "Full Z-axis freedom: layers clock anywhere from behind the foreground subject (0%) to in front of all elements (100%). Drag to adjust depth with 60 FPS live reactivity."
             )
 
             // Sensitivity / Detection Threshold Slider with Recommended Dot
@@ -1098,35 +857,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
 
             // Depth / Matting Balance Slider: Shown when Flagship Fusion Pipeline is active
-            if (isFusionPipeline) {
-                TuningSliderWithDefaultIndicator(
-                    title = "Depth / Matting Balance",
-                    value = fusionBalance,
-                    onValueChange = {
-                        fusionBalance = it
-                        viewModel.onTuningChanged(
-                            threshold = threshold,
-                            feathering = feathering,
-                            maskExpansion = maskExpansion,
-                            inpaintRadius = inpaintRadius,
-                            modelType = selectedModel,
-                            cutoutContrast = cutoutContrast,
-                            processingMode = processingMode,
-                            pipelineChoice = selectedPipeline,
-                            clockZDepth = clockZDepth,
-                            depthPlaneOffset = depthPlaneOffset,
-                            fusionBalance = it,
-                            enableHoleFilling = enableHoleFilling,
-                            holeFillingRadius = holeFillingRadius,
-                            debounceMs = 250L
-                        )
-                    },
-                    valueRange = 0.10f..0.90f,
-                    recommendedValue = 0.50f,
-                    displayValue = "${(fusionBalance * 100).toInt()}%",
-                    description = "Balances 3D depth geometry (left = solid full-body) against neural portrait matting (right = sub-pixel hair details)."
-                )
-            }
+
 
             // Layer Flatness (Solid Opacity Contrast) Slider: Hidden for pure depth models, shown for portraits/objects
             if (!isDepthModel) {

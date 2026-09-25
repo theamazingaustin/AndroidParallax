@@ -131,21 +131,38 @@ class StudioViewModel(
     fun importNewImage(bitmap: Bitmap, title: String = "My Wallpaper") {
         _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "AI segmenting photo on-device...")
         viewModelScope.launch(Dispatchers.Default) {
-            val result = segmentationEngine.processImage(
+            val portraitResult = segmentationEngine.processImage(
                 sourceBmp = bitmap,
-                threshold = 0.5f,
-                edgeFeathering = 6,
+                threshold = 0.40f,
+                edgeFeathering = 8,
                 maskExpansion = 0,
-                inpaintRadius = 8
+                inpaintRadius = 6,
+                processingMode = ProcessingMode.SINGLE_MODEL,
+                modelChoice = AiModelChoice.SELFIE_MULTICLASS
             )
 
-            // Auto-detect mode: Portrait -> LAYERED_2D, Scenic/Other -> SPATIAL_3D
-            val detectedMode = if (result.isPortraitDetected) RenderMode.LAYERED_2D else RenderMode.SPATIAL_3D
+            val isPortrait = portraitResult.isPortraitDetected
+            val selectedModel = if (isPortrait) AiModelChoice.SELFIE_MULTICLASS else AiModelChoice.DEEPLAB_V3
+            val result = if (!isPortrait) {
+                segmentationEngine.processImage(
+                    sourceBmp = bitmap,
+                    threshold = 0.48f,
+                    edgeFeathering = 4,
+                    maskExpansion = 1,
+                    inpaintRadius = 8,
+                    processingMode = ProcessingMode.SINGLE_MODEL,
+                    modelChoice = AiModelChoice.DEEPLAB_V3
+                )
+            } else {
+                portraitResult
+            }
 
             val newProject = WallpaperProject(
                 title = title,
-                renderMode = detectedMode,
-                clockZDepth = result.naturalDepthGap,
+                renderMode = RenderMode.LAYERED_2D,
+                processingMode = ProcessingMode.SINGLE_MODEL,
+                selectedModel = selectedModel,
+                clockZDepth = 0.50f,
                 isActive = true
             )
 
@@ -179,7 +196,7 @@ class StudioViewModel(
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
                     isProcessing = false,
-                    statusMessage = if (result.isPortraitDetected) "Detected Portrait → Layered Cutout" else "Detected Scene → 3D Spatial Depth"
+                    statusMessage = if (isPortrait) "Detected Portrait → MediaPipe Matting" else "Detected Scene → DeepLab Segmentation"
                 )
                 refreshProjectsList()
             }
@@ -495,72 +512,20 @@ class StudioViewModel(
     }
 
     /**
-     * Instantly updates depth layer count (2 to 20) in < 5ms without re-running TFLite.
-     */
-    fun updateDepthLayerCount(count: Int) {
-        val src = _uiState.value.sourceBitmap ?: return
-        val cur = _uiState.value.currentProject
-        val newCount = count.coerceIn(2, 20)
-        val updatedMeta = cur.copy(depthLayerCount = newCount)
-
-        if (ensureCachedDepth()) {
-            val depth = cachedNormalizedDepth ?: return
-            val newCutout = segmentationEngine.generateMultiLayerCutout(
-                sourceBmp = src,
-                normalizedDepth = depth,
-                depthW = cachedDepthW,
-                depthH = cachedDepthH,
-                layerCount = newCount,
-                clockZDepth = updatedMeta.clockZDepth,
-                edgeFeathering = updatedMeta.edgeFeathering,
-                enableHoleFilling = updatedMeta.enableHoleFilling
-            )
-            _uiState.value = _uiState.value.copy(
-                currentProject = updatedMeta,
-                cutoutBitmap = newCutout
-            )
-            saveJob?.cancel()
-            saveJob = viewModelScope.launch(Dispatchers.IO) {
-                delay(400)
-                repository.saveProject(updatedMeta, cutoutBmp = newCutout)
-            }
-        } else {
-            onTuningChanged(depthLayerCount = newCount, debounceMs = 0L)
-        }
-    }
-
-    /**
-     * Instantly adjusts Clock Z-depth (0.0 to 1.0) at 60 FPS in < 5ms without re-running TFLite.
+     * Instantly adjusts Clock Z-depth (0.0 to 1.0) at 60 FPS in < 5ms without re-running TFLite
+     * and without altering or corrupting the segmented cutout bitmap.
      */
     fun onClockZDepthChanged(zDepth: Float) {
-        val src = _uiState.value.sourceBitmap ?: return
         val cur = _uiState.value.currentProject
         val newZ = zDepth.coerceIn(0.0f, 1.0f)
         val updatedMeta = cur.copy(clockZDepth = newZ)
 
-        if (ensureCachedDepth()) {
-            val depth = cachedNormalizedDepth ?: return
-            val newCutout = segmentationEngine.generateMultiLayerCutout(
-                sourceBmp = src,
-                normalizedDepth = depth,
-                depthW = cachedDepthW,
-                depthH = cachedDepthH,
-                layerCount = updatedMeta.depthLayerCount,
-                clockZDepth = newZ,
-                edgeFeathering = updatedMeta.edgeFeathering,
-                enableHoleFilling = updatedMeta.enableHoleFilling
-            )
-            _uiState.value = _uiState.value.copy(
-                currentProject = updatedMeta,
-                cutoutBitmap = newCutout
-            )
-            saveJob?.cancel()
-            saveJob = viewModelScope.launch(Dispatchers.IO) {
-                delay(400)
-                repository.saveProject(updatedMeta, cutoutBmp = newCutout)
-            }
-        } else {
-            onTuningChanged(clockZDepth = newZ, debounceMs = 150L)
+        _uiState.value = _uiState.value.copy(currentProject = updatedMeta)
+
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(300)
+            repository.saveProjectMetaOnly(updatedMeta)
         }
     }
 
@@ -569,7 +534,7 @@ class StudioViewModel(
     }
 
     /**
-     * Tapping on the preview samples continuous 3D depth, snaps to the layer boundary,
+     * Tapping on the preview samples continuous 3D depth,
      * and sets Clock Z-depth instantaneously (< 5ms).
      */
     fun onTapPreviewCoordinate(normX: Float, normY: Float) {
@@ -578,12 +543,8 @@ class StudioViewModel(
         val px = (normX * (cachedDepthW - 1)).toInt().coerceIn(0, cachedDepthW - 1)
         val py = (normY * (cachedDepthH - 1)).toInt().coerceIn(0, cachedDepthH - 1)
         val continuousZ = depth[py * cachedDepthW + px]
-        
-        val K = _uiState.value.currentProject.depthLayerCount.coerceIn(2, 20)
-        val layerIdx = min(K - 1, (continuousZ * K).toInt())
-        val snappedZ = (layerIdx.toFloat() / (K - 1)).coerceIn(0.0f, 1.0f)
 
-        onClockZDepthChanged(snappedZ)
+        onClockZDepthChanged(continuousZ.coerceIn(0.0f, 1.0f))
     }
 
     fun getCurrentModelType(): AiModelChoice = segmentationEngine.currentModelChoice

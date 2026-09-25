@@ -338,31 +338,9 @@ object InpaintingEngine {
                             val baseG = if (hasLeft && hasRight) (1f - t) * lg + t * rg else if (hasLeft) lg else rg
                             val baseB = if (hasLeft && hasRight) (1f - t) * lb + t * rb else if (hasLeft) lb else rb
 
-                            // High-Frequency Wave/Surface Texture Extraction & Injection
-                            val dLeft = hx - startX
-                            val dRight = endX - hx
-
-                            var texDeltaR = 0f
-                            var texDeltaG = 0f
-                            var texDeltaB = 0f
-
-                            if (hasLeft && (!hasRight || dLeft <= dRight)) {
-                                val sampleX = max(0, leftX - (dLeft % 32))
-                                val sc = pixels[row + sampleX]
-                                texDeltaR = (((sc shr 16) and 0xFF) - lr) * 0.75f
-                                texDeltaG = (((sc shr 8) and 0xFF) - lg) * 0.75f
-                                texDeltaB = ((sc and 0xFF) - lb) * 0.75f
-                            } else if (hasRight) {
-                                val sampleX = min(w - 1, rightX + (dRight % 32))
-                                val sc = pixels[row + sampleX]
-                                texDeltaR = (((sc shr 16) and 0xFF) - rr) * 0.75f
-                                texDeltaG = (((sc shr 8) and 0xFF) - rg) * 0.75f
-                                texDeltaB = ((sc and 0xFF) - rb) * 0.75f
-                            }
-
-                            horizR[idx] = (baseR + texDeltaR).coerceIn(0f, 255f)
-                            horizG[idx] = (baseG + texDeltaG).coerceIn(0f, 255f)
-                            horizB[idx] = (baseB + texDeltaB).coerceIn(0f, 255f)
+                            horizR[idx] = baseR
+                            horizG[idx] = baseG
+                            horizB[idx] = baseB
                             hasHoriz[idx] = true
                         }
                     }
@@ -409,19 +387,19 @@ object InpaintingEngine {
             for (x in 0 until w) {
                 val idx = row + x
                 if (dilatedHole[idx]) {
-                    // Hybrid infilled color: 80% Horizontal Structure + 20% Pyramid Shading
+                    // Hybrid infilled color: 50% Smooth Horizontal Structure + 50% Multi-Scale Pyramid Shading
                     val infilledR = if (hasHoriz[idx]) {
-                        0.80f * horizR[idx] + 0.20f * pyramidL0.r[idx]
+                        0.50f * horizR[idx] + 0.50f * pyramidL0.r[idx]
                     } else {
                         pyramidL0.r[idx]
                     }
                     val infilledG = if (hasHoriz[idx]) {
-                        0.80f * horizG[idx] + 0.20f * pyramidL0.g[idx]
+                        0.50f * horizG[idx] + 0.50f * pyramidL0.g[idx]
                     } else {
                         pyramidL0.g[idx]
                     }
                     val infilledB = if (hasHoriz[idx]) {
-                        0.80f * horizB[idx] + 0.20f * pyramidL0.b[idx]
+                        0.50f * horizB[idx] + 0.50f * pyramidL0.b[idx]
                     } else {
                         pyramidL0.b[idx]
                     }

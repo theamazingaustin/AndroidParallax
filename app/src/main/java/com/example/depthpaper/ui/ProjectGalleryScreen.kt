@@ -132,16 +132,29 @@ fun ProjectGalleryScreen(
     }
 
     // Updater State
+    val prefs = remember { context.getSharedPreferences("depthpaper_prefs", android.content.Context.MODE_PRIVATE) }
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
 
+    val dismissUpdate = {
+        updateInfo?.let { info ->
+            prefs.edit().putString("dismissed_update_tag", info.versionTag).apply()
+        }
+        updateInfo = null
+    }
+
     // Automatic update check upon launch
     LaunchedEffect(Unit) {
+        val dismissedTag = prefs.getString("dismissed_update_tag", "")
         when (val result = AppUpdater.checkForUpdate()) {
-            is UpdateCheckResult.UpdateAvailable -> updateInfo = result.updateInfo
+            is UpdateCheckResult.UpdateAvailable -> {
+                if (result.updateInfo.versionTag != dismissedTag) {
+                    updateInfo = result.updateInfo
+                }
+            }
             else -> Unit
         }
     }
@@ -149,7 +162,7 @@ fun ProjectGalleryScreen(
     // Update Dialog
     updateInfo?.let { info ->
         AlertDialog(
-            onDismissRequest = { if (!isDownloading) updateInfo = null },
+            onDismissRequest = { if (!isDownloading) dismissUpdate() },
             containerColor = Color(0xFF1E1E2E),
             titleContentColor = Color.White,
             textContentColor = Color.LightGray,
@@ -237,7 +250,7 @@ fun ProjectGalleryScreen(
             },
             dismissButton = {
                 if (!isDownloading) {
-                    TextButton(onClick = { updateInfo = null }) {
+                    TextButton(onClick = { dismissUpdate() }) {
                         Text("Later", color = Color.Gray)
                     }
                 }
