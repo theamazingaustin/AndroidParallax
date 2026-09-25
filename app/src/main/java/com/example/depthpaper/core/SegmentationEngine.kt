@@ -859,11 +859,20 @@ class SegmentationEngine(private val context: Context) {
         AppLogger.i("SegmentationEngine", "processImage: ${w}x${h}, mode=$processingMode, model=${modelChoice.modelName}, zDepth=$clockZDepth, layers=$depthLayerCount")
 
         // 1. ALWAYS run Depth Anything V2 for real 3D scene geometry & continuous metric depth!
+        // CRITICAL: DepthAnythingEngine requires a Depth Anything V2 TFLite model.
+        // Semantic segmentation models (selfie, deeplab) have a completely different
+        // architecture and must NOT be passed to the depth engine.
+        val depthModelAsset = when (modelChoice) {
+            AiModelChoice.DEPTH_ANYTHING_V2 -> DepthAnythingEngine.MODEL_SMALL_ASSET
+            AiModelChoice.DEPTH_ANYTHING_V2_BASE -> DepthAnythingEngine.MODEL_BASE_ASSET
+            // For all semantic models: depth estimation always uses Depth Anything V2 Small
+            else -> DepthAnythingEngine.MODEL_SMALL_ASSET
+        }
         val depthResult = DepthAnythingEngine.estimateDepth(
             context = context,
             inputBitmap = inferenceBmp,
             clockZDepth = clockZDepth,
-            modelAsset = modelChoice.assetPath
+            modelAsset = depthModelAsset
         )
 
         // 2. Execute selected AI processing architecture for foreground extraction
@@ -980,9 +989,14 @@ class SegmentationEngine(private val context: Context) {
         val invW = 1.0f / max(1, w - 1)
         val invH = 1.0f / max(1, h - 1)
 
-        val transBand = 0.12f
+        // Transition zone width: ONLY genuine edge pixels get guided feathering.
+        // Interior pixels (confidence >= threshold + transBand) are locked to alpha=255.
+        // Exterior pixels (confidence <= threshold - transBand) are locked to alpha=0.
+        // A wide transBand causes face/body hollowing (dark areas inside silhouette get semi-transparent).
+        // 0.05 = tight 5% band — only the real edge boundary gets feathered.
+        val transBand = 0.05f
         val solidFgThresh = (threshold + transBand).coerceAtMost(0.95f)
-        val solidBgThresh = (threshold - transBand).coerceAtLeast(0.08f)
+        val solidBgThresh = (threshold - transBand).coerceAtLeast(0.02f)
         val bandDenom = max(0.0001f, solidFgThresh - solidBgThresh)
         val contrastFactor = 1.0f + (cutoutContrast - 0.5f) * 6.0f
 
