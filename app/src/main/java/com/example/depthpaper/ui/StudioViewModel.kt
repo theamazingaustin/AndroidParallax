@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.depthpaper.core.AiModelChoice
 import com.example.depthpaper.core.AiPipelineChoice
+import com.example.depthpaper.core.AppLogger
 import com.example.depthpaper.core.DepthSlicingEngine
 import com.example.depthpaper.core.ProcessingMode
 import com.example.depthpaper.core.SegmentationEngine
@@ -80,25 +81,35 @@ class StudioViewModel(
         if (projId.isNotBlank()) {
             val rawBmp = repository.loadRawDepthBitmap(projId)
             if (rawBmp != null) {
-                cachedNormalizedDepth = DepthSlicingEngine.extractGrayscaleDepth(rawBmp)
-                cachedDepthW = rawBmp.width
-                cachedDepthH = rawBmp.height
-                return true
+                val d = DepthSlicingEngine.extractGrayscaleDepth(rawBmp)
+                if (d != null) {
+                    cachedNormalizedDepth = d
+                    cachedDepthW = rawBmp.width
+                    cachedDepthH = rawBmp.height
+                    return true
+                }
             }
         }
         val depthBmp = _uiState.value.depthBitmap ?: return false
-        val w = depthBmp.width
-        val h = depthBmp.height
-        val pixels = IntArray(w * h)
-        depthBmp.getPixels(pixels, 0, w, 0, 0, w, h)
-        val depthArr = FloatArray(w * h)
-        for (i in 0 until (w * h)) {
-            depthArr[i] = (Color.red(pixels[i]) / 255.0f).coerceIn(0f, 1f)
+        val safeDepthBmp = DepthSlicingEngine.ensureSoftwareBitmap(depthBmp)
+        val w = safeDepthBmp.width
+        val h = safeDepthBmp.height
+        if (w <= 0 || h <= 0) return false
+        return try {
+            val pixels = IntArray(w * h)
+            safeDepthBmp.getPixels(pixels, 0, w, 0, 0, w, h)
+            val depthArr = FloatArray(w * h)
+            for (i in 0 until (w * h)) {
+                depthArr[i] = (Color.red(pixels[i]) / 255.0f).coerceIn(0f, 1f)
+            }
+            cachedNormalizedDepth = depthArr
+            cachedDepthW = w
+            cachedDepthH = h
+            true
+        } catch (t: Throwable) {
+            AppLogger.e("StudioViewModel", "ensureCachedDepth failed", t)
+            false
         }
-        cachedNormalizedDepth = depthArr
-        cachedDepthW = w
-        cachedDepthH = h
-        return true
     }
 
     init {
@@ -126,16 +137,36 @@ class StudioViewModel(
     }
 
     private suspend fun loadProjectBitmaps(project: WallpaperProject) = withContext(Dispatchers.IO) {
-        val src = repository.loadBitmap(project.sourceImagePath)
-        val cut = repository.loadBitmap(project.cutoutImagePath)
+        val rawSrc = repository.loadBitmap(project.sourceImagePath)
+        val src = rawSrc?.let { DepthSlicingEngine.getSafeWorkingBitmap(it) }
+        var cut = repository.loadBitmap(project.cutoutImagePath)
         val bg = repository.loadBitmap(project.inpaintedBackgroundPath) ?: src
         val depth = repository.loadBitmap(project.depthMapPath)
         val rawDepthBmp = repository.loadRawDepthBitmap(project.id)
 
         if (rawDepthBmp != null) {
-            cachedNormalizedDepth = DepthSlicingEngine.extractGrayscaleDepth(rawDepthBmp)
-            cachedDepthW = rawDepthBmp.width
-            cachedDepthH = rawDepthBmp.height
+            val d = DepthSlicingEngine.extractGrayscaleDepth(rawDepthBmp)
+            if (d != null) {
+                cachedNormalizedDepth = d
+                cachedDepthW = rawDepthBmp.width
+                cachedDepthH = rawDepthBmp.height
+            }
+        }
+
+        // If cutout is null and we have depth and source, generate it immediately at clockZDepth!
+        if (cut == null && src != null && ensureCachedDepth()) {
+            val d = cachedNormalizedDepth
+            val dw = cachedDepthW
+            val dh = cachedDepthH
+            if (d != null && dw > 0 && dh > 0) {
+                cut = DepthSlicingEngine.sliceForegroundCutout(
+                    sourceBmp = src,
+                    normalizedDepth = d,
+                    depthWidth = dw,
+                    depthHeight = dh,
+                    clockZDepth = project.clockZDepth
+                )
+            }
         }
 
         _uiState.value = _uiState.value.copy(
@@ -148,10 +179,11 @@ class StudioViewModel(
     }
 
     fun importNewImage(bitmap: Bitmap, title: String = "My Wallpaper") {
+        val safeWorkingBmp = DepthSlicingEngine.getSafeWorkingBitmap(bitmap)
         _uiState.value = _uiState.value.copy(isProcessing = true, statusMessage = "AI estimating 3D depth on-device...")
         viewModelScope.launch(Dispatchers.Default) {
             val result = segmentationEngine.processImage(
-                sourceBmp = bitmap,
+                sourceBmp = safeWorkingBmp,
                 threshold = 0.50f,
                 edgeFeathering = 6,
                 maskExpansion = 0,
@@ -170,10 +202,10 @@ class StudioViewModel(
                 isActive = true
             )
 
-            val thumbScale = 480f / maxOf(bitmap.width, bitmap.height)
-            val thumbW = if (thumbScale < 1f) (bitmap.width * thumbScale).toInt() else bitmap.width
-            val thumbH = if (thumbScale < 1f) (bitmap.height * thumbScale).toInt() else bitmap.height
-            val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
+            val thumbScale = 480f / maxOf(safeWorkingBmp.width, safeWorkingBmp.height)
+            val thumbW = if (thumbScale < 1f) (safeWorkingBmp.width * thumbScale).toInt() else safeWorkingBmp.width
+            val thumbH = if (thumbScale < 1f) (safeWorkingBmp.height * thumbScale).toInt() else safeWorkingBmp.height
+            val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(safeWorkingBmp, thumbW, thumbH, true) else safeWorkingBmp
 
             val rawDepthBmp = if (result.normalizedDepth != null) {
                 cachedNormalizedDepth = result.normalizedDepth
@@ -185,7 +217,7 @@ class StudioViewModel(
             // Initial slice at clockZDepth = 0.50f
             val initialCutout = if (result.normalizedDepth != null) {
                 DepthSlicingEngine.sliceForegroundCutout(
-                    sourceBmp = bitmap,
+                    sourceBmp = safeWorkingBmp,
                     normalizedDepth = result.normalizedDepth,
                     depthWidth = result.depthWidth,
                     depthHeight = result.depthHeight,
@@ -197,7 +229,7 @@ class StudioViewModel(
 
             val saved = repository.saveProject(
                 project = newProject,
-                sourceBmp = bitmap,
+                sourceBmp = safeWorkingBmp,
                 cutoutBmp = initialCutout,
                 inpaintedBgBmp = result.inpaintedBackground,
                 depthBmp = result.depthMap,
@@ -210,7 +242,7 @@ class StudioViewModel(
             withContext(Dispatchers.Main) {
                 _uiState.value = _uiState.value.copy(
                     currentProject = saved,
-                    sourceBitmap = bitmap,
+                    sourceBitmap = safeWorkingBmp,
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
@@ -577,18 +609,24 @@ class StudioViewModel(
             if (depth != null && dW > 0 && dH > 0) {
                 sliceJob?.cancel()
                 sliceJob = viewModelScope.launch(Dispatchers.Default) {
-                    val sliced = DepthSlicingEngine.sliceForegroundCutout(
-                        sourceBmp = src,
-                        normalizedDepth = depth,
-                        depthWidth = dW,
-                        depthHeight = dH,
-                        clockZDepth = newZ
-                    )
-                    withContext(Dispatchers.Main) {
-                        _uiState.value = _uiState.value.copy(
-                            cutoutBitmap = sliced,
-                            currentProject = updatedMeta
+                    try {
+                        val sliced = DepthSlicingEngine.sliceForegroundCutout(
+                            sourceBmp = src,
+                            normalizedDepth = depth,
+                            depthWidth = dW,
+                            depthHeight = dH,
+                            clockZDepth = newZ
                         )
+                        if (sliced != null) {
+                            withContext(Dispatchers.Main) {
+                                _uiState.value = _uiState.value.copy(
+                                    cutoutBitmap = sliced,
+                                    currentProject = updatedMeta
+                                )
+                            }
+                        }
+                    } catch (t: Throwable) {
+                        AppLogger.e("StudioViewModel", "sliceJob error", t)
                     }
                 }
             }
@@ -596,11 +634,15 @@ class StudioViewModel(
 
         saveJob?.cancel()
         saveJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(300)
-            repository.saveProjectMetaOnly(updatedMeta)
-            val currentCut = _uiState.value.cutoutBitmap
-            if (currentCut != null) {
-                repository.saveCutoutOnly(updatedMeta.id, currentCut)
+            try {
+                delay(350)
+                repository.saveProjectMetaOnly(updatedMeta)
+                val currentCut = _uiState.value.cutoutBitmap
+                if (currentCut != null) {
+                    repository.saveCutoutOnly(updatedMeta.id, currentCut)
+                }
+            } catch (t: Throwable) {
+                AppLogger.e("StudioViewModel", "saveJob error", t)
             }
         }
     }

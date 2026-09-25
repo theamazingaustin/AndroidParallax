@@ -359,7 +359,7 @@ fun ParallaxViewport(
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
 
-            val isInFrontOfEverything = project.clockZDepth >= 0.999f || !project.lockScreenConfig.subjectInFrontOfClock
+            val isInFrontOfEverything = project.clockZDepth >= 0.999f
 
             // 2. Draw Lock Screen Clock definition
             val showClock = previewSurface == PreviewSurface.LOCK_SCREEN || !project.homeScreenConfig.hideClockOnHomeScreen

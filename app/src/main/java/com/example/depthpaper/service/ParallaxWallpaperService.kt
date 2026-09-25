@@ -255,7 +255,7 @@ class ParallaxWallpaperService : WallpaperService() {
                 baseTop + fgShiftY + drawH
             )
 
-            val isInFrontOfEverything = project.clockZDepth >= 0.999f || !project.lockScreenConfig.subjectInFrontOfClock
+            val isInFrontOfEverything = project.clockZDepth >= 0.999f
 
             // 2. Clock Layer definition
             val drawClockAction = {
