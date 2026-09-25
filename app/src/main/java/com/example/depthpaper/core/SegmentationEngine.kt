@@ -1466,28 +1466,15 @@ class SegmentationEngine(private val context: Context) {
     }
 
     /**
-     * Universal edge and chromatic saliency segmentation for scenery, architecture, and objects.
+     * Smooth radial focal fallback for scenery/objects when ML detection finds 0 subjects.
+     * Generates a clean, smooth center-weighted mask without any edge-detection artifacts.
      */
     fun computeUniversalSaliencyMask(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
         val mW = min(320, bitmap.width)
         val mH = min(320, bitmap.height)
-        val scaled = Bitmap.createScaledBitmap(bitmap, mW, mH, true)
-        val pixels = IntArray(mW * mH)
-        scaled.getPixels(pixels, 0, mW, 0, 0, mW, mH)
-        if (scaled != bitmap && !scaled.isRecycled) scaled.recycle()
-
-        val lum = FloatArray(mW * mH)
-        for (i in 0 until mW * mH) {
-            val c = pixels[i]
-            val r = (c shr 16 and 0xFF) / 255f
-            val g = (c shr 8 and 0xFF) / 255f
-            val b = (c and 0xFF) / 255f
-            lum[i] = 0.299f * r + 0.587f * g + 0.114f * b
-        }
-
         val scores = FloatArray(mW * mH)
         val cx = mW / 2f
-        val cy = mH * 0.45f
+        val cy = mH * 0.50f
         val maxDist = Math.hypot(cx.toDouble(), cy.toDouble()).toFloat()
 
         for (y in 0 until mH) {
@@ -1497,16 +1484,12 @@ class SegmentationEngine(private val context: Context) {
                 val dx = x - cx
                 val dy = y - cy
                 val dist = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-                val centerWeight = 1.0f - (dist / maxDist).coerceIn(0f, 1f)
-
-                val gx = if (x in 1 until mW - 1) lum[idx + 1] - lum[idx - 1] else 0f
-                val gy = if (y in 1 until mH - 1) lum[idx + mW] - lum[idx - mW] else 0f
-                val edgeMag = (Math.hypot(gx.toDouble(), gy.toDouble()) * 2.0).toFloat().coerceIn(0f, 1f)
-
-                scores[idx] = (edgeMag * 0.40f + centerWeight * 0.60f).coerceIn(0f, 1f)
+                // Smooth cosine falloff from center to edges (1.0 at center, 0.0 at borders)
+                val normDist = (dist / maxDist).coerceIn(0f, 1f)
+                val weight = (0.5f + 0.5f * kotlin.math.cos(Math.PI * normDist)).toFloat()
+                scores[idx] = weight.coerceIn(0f, 1f)
             }
         }
-
         return Triple(scores, mW, mH)
     }
 
