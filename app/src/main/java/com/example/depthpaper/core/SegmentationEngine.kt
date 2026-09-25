@@ -1055,14 +1055,22 @@ class SegmentationEngine(private val context: Context) {
             fallbackBmp
         }
 
-        // 8. Inpainted Background Plate (Tight dilation preserves pristine background textures)
+        // 8. Inpainted Background Plate
+        // CRITICAL: Use a much lower inpainting threshold than the cutout threshold.
+        // Low-confidence pixels (legs, feet in group shots) may be transparent in the foreground
+        // cutout (below cutout threshold) but still need to be ERASED from the background plate.
+        // If they remain in both plates and the plates move in opposite parallax directions →
+        // double-vision ghost artifacts.
+        // inpaintThreshold = ~45% of cutout threshold ensures full body coverage in background.
+        val inpaintThreshold = (threshold * 0.45f).coerceAtLeast(0.10f)
+        val inpaintDilation = inpaintRadius.coerceIn(8, 24)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = solidMask,
             maskWidth = maskW,
             maskHeight = maskH,
-            threshold = threshold,
-            dilationRadius = inpaintRadius.coerceIn(2, 16)
+            threshold = inpaintThreshold,
+            dilationRadius = inpaintDilation
         )
 
         return SegmentationResult(

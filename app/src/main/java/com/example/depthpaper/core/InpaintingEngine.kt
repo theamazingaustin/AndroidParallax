@@ -66,8 +66,10 @@ object InpaintingEngine {
         val pixels = IntArray(w * h)
         outBmp.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // 1. Bilinear mask resampling
-        val holeThreshold = threshold.coerceIn(0.35f, 0.85f)
+        // Use caller-provided threshold directly.
+        // A lower threshold here ensures even low-confidence body parts (legs, feet)
+        // are erased from the background plate, preventing parallax double-vision.
+        val holeThreshold = threshold.coerceIn(0.05f, 0.95f)
         val rawHole = BooleanArray(w * h)
         var holePixelCount = 0
 
@@ -92,8 +94,8 @@ object InpaintingEngine {
             return outBmp
         }
 
-        // 2. Fast Separable 2D Box Dilation: clamped to 2..16px (tight boundary, preserves surrounding scenery)
-        val dR = dilationRadius.coerceIn(2, 16)
+        // 2. Fast Separable 2D Box Dilation: expanded up to 32px for group photos
+        val dR = dilationRadius.coerceIn(2, 32)
         val tempDilated = BooleanArray(w * h)
         val dilatedHole = BooleanArray(w * h)
 
