@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.depthpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 24
-        versionName = "0.20.4"
+        versionCode = 25
+        versionName = "0.21.0"
     }
 
     signingConfigs {
@@ -48,7 +48,7 @@ android {
     }
 
     androidResources {
-        noCompress += "tflite"
+        noCompress += listOf("tflite", "onnx")
     }
 
     packaging {
@@ -90,6 +90,7 @@ dependencies {
   implementation("org.tensorflow:tensorflow-lite:2.16.1")
   implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
   implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests

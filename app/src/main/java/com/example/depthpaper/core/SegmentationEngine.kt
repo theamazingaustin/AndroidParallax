@@ -862,17 +862,15 @@ class SegmentationEngine(private val context: Context) {
         // CRITICAL: DepthAnythingEngine requires a Depth Anything V2 TFLite model.
         // Semantic segmentation models (selfie, deeplab) have a completely different
         // architecture and must NOT be passed to the depth engine.
-        val depthModelAsset = when (modelChoice) {
-            AiModelChoice.DEPTH_ANYTHING_V2 -> DepthAnythingEngine.MODEL_SMALL_ASSET
-            AiModelChoice.DEPTH_ANYTHING_V2_BASE -> DepthAnythingEngine.MODEL_BASE_ASSET
-            // For all semantic models: depth estimation always uses Depth Anything V2 Small
-            else -> DepthAnythingEngine.MODEL_SMALL_ASSET
-        }
-        val depthResult = DepthAnythingEngine.estimateDepth(
+        val depthResult = OnnxDepthAnythingEngine.estimateDepth(
+            context = context,
+            inputBitmap = inferenceBmp,
+            clockZDepth = clockZDepth
+        ) ?: DepthAnythingEngine.estimateDepth(
             context = context,
             inputBitmap = inferenceBmp,
             clockZDepth = clockZDepth,
-            modelAsset = depthModelAsset
+            modelAsset = DepthAnythingEngine.MODEL_SMALL_ASSET
         )
 
         // 2. Execute selected AI processing architecture for foreground extraction
@@ -1497,6 +1495,7 @@ class SegmentationEngine(private val context: Context) {
         deepLabSegmenter.close()
         multiclassSegmenter.close()
         fastSelfieSegmenter.close()
+        OnnxDepthAnythingEngine.close()
         DepthAnythingEngine.close()
     }
 }
