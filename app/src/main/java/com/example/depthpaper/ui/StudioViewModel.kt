@@ -34,7 +34,11 @@ enum class PreviewSurface {
     LOCK_SCREEN,
     HOME_SCREEN,
     AOD,
-    DEPTH_MAP
+    DEPTH_MAP,
+    MEDIAPIPE_MASK,
+    DEEPLAB_MASK,
+    CUTOUT,
+    INPAINTED_BG
 }
 
 enum class StudioTab {
@@ -52,6 +56,8 @@ data class StudioUiState(
     val cutoutBitmap: Bitmap? = null,
     val backgroundBitmap: Bitmap? = null,
     val depthBitmap: Bitmap? = null,
+    val mediaPipeBitmap: Bitmap? = null,
+    val deepLabBitmap: Bitmap? = null,
     val isProcessing: Boolean = false,
     val statusMessage: String? = null,
     val previewSurface: PreviewSurface = PreviewSurface.LOCK_SCREEN,
@@ -218,6 +224,8 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mediaPipeBitmap = result.mediaPipeMask,
+                    deepLabBitmap = result.deepLabMask,
                     isProcessing = false,
                     statusMessage = "Continuous 3D Depth Map ready"
                 )
@@ -285,6 +293,8 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mediaPipeBitmap = result.mediaPipeMask,
+                    deepLabBitmap = result.deepLabMask,
                     isProcessing = false,
                     statusMessage = null
                 )
@@ -489,6 +499,8 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mediaPipeBitmap = result.mediaPipeMask,
+                    deepLabBitmap = result.deepLabMask,
                     isProcessing = false,
                     statusMessage = null
                 )
@@ -650,7 +662,9 @@ class StudioViewModel(
                     sourceBitmap = null,
                     cutoutBitmap = null,
                     backgroundBitmap = null,
-                    depthBitmap = null
+                    depthBitmap = null,
+                    mediaPipeBitmap = null,
+                    deepLabBitmap = null
                 )
             }
         }

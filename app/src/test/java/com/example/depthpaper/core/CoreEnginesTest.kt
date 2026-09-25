@@ -307,4 +307,54 @@ class CoreEnginesTest {
         assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("anything_unknown"))
         assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("UNIVERSAL_CASCADE"))
     }
+
+    @Test
+    fun testDualModelSemanticFusionCombinesLimbAndFace() {
+        val mW = 4
+        val mH = 4
+        // MediaPipe detects subject in top-left (e.g. face/hair)
+        val mMask = FloatArray(mW * mH) { 0.0f }
+        mMask[0] = 0.95f
+        mMask[1] = 0.90f
+
+        val dW = 4
+        val dH = 4
+        // DeepLab detects outstretched limb / person in bottom-right
+        val dMask = FloatArray(dW * dH) { 0.0f }
+        dMask[14] = 0.85f
+        dMask[15] = 0.92f
+
+        val (fused, fW, fH) = SegmentationEngine.fuseSemanticMasks(
+            mMask = mMask, mW = mW, mH = mH,
+            dMask = dMask, dW = dW, dH = dH
+        )
+
+        assertEquals(4, fW)
+        assertEquals(4, fH)
+        // Top-left should have MediaPipe face
+        assertTrue(fused[0] > 0.90f)
+        // Bottom-right should have DeepLab limb
+        assertTrue(fused[15] > 0.90f)
+        // Middle should remain background
+        assertEquals(0.0f, fused[5], 0.01f)
+    }
+
+    @Test
+    fun testDualModelSemanticFusionHandlesSingleModel() {
+        val mW = 2
+        val mH = 2
+        val mMask = floatArrayOf(0.1f, 0.2f, 0.3f, 0.4f)
+
+        // Only MediaPipe present
+        val (fused1, fW1, fH1) = SegmentationEngine.fuseSemanticMasks(mMask, mW, mH, null, 0, 0)
+        assertEquals(2, fW1)
+        assertEquals(2, fH1)
+        assertEquals(0.4f, fused1[3], 0.001f)
+
+        // Only DeepLab present
+        val (fused2, fW2, fH2) = SegmentationEngine.fuseSemanticMasks(null, 0, 0, mMask, mW, mH)
+        assertEquals(2, fW2)
+        assertEquals(2, fH2)
+        assertEquals(0.4f, fused2[3], 0.001f)
+    }
 }

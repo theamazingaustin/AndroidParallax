@@ -316,7 +316,9 @@ data class SegmentationResult(
     val normalizedDepth: FloatArray? = null,
     val depthWidth: Int = 0,
     val depthHeight: Int = 0,
-    val depthLayerCount: Int = 8
+    val depthLayerCount: Int = 8,
+    val mediaPipeMask: Bitmap? = null,
+    val deepLabMask: Bitmap? = null
 )
 
 /**
@@ -630,6 +632,90 @@ class SegmentationEngine(private val context: Context) {
 
     companion object {
         /**
+         * Converts a normalized float mask (0.0..1.0) into a grayscale Bitmap for diagnostic preview.
+         */
+        fun createGrayscaleMaskBitmap(mask: FloatArray, width: Int, height: Int): Bitmap {
+            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val pixels = IntArray(width * height)
+            for (i in pixels.indices) {
+                val v = (mask[i].coerceIn(0f, 1f) * 255f).toInt()
+                pixels[i] = Color.rgb(v, v, v)
+            }
+            bmp.setPixels(pixels, 0, width, 0, 0, width, height)
+            return bmp
+        }
+
+        /**
+         * Fuses MediaPipe high-detail facial/portrait mask with DeepLab v3 multi-person/limb mask.
+         * Takes pixel-wise max after bilinear resampling to preserve both sharp facial contours
+         * and full extended limbs / background group members.
+         */
+        fun fuseSemanticMasks(
+            mMask: FloatArray?, mW: Int, mH: Int,
+            dMask: FloatArray?, dW: Int, dH: Int
+        ): Triple<FloatArray, Int, Int> {
+            val outW = max(mW, dW).coerceAtLeast(1)
+            val outH = max(mH, dH).coerceAtLeast(1)
+            val fused = FloatArray(outW * outH)
+
+            val hasMp = mMask != null && mW > 0 && mH > 0
+            val hasDl = dMask != null && dW > 0 && dH > 0
+
+            if (!hasMp && !hasDl) {
+                return Triple(fused, outW, outH)
+            }
+            if (hasMp && !hasDl) {
+                return Triple(mMask, mW, mH)
+            }
+            if (!hasMp && hasDl) {
+                return Triple(dMask, dW, dH)
+            }
+
+            // Both present: bilinear sample and max-combine
+            for (y in 0 until outH) {
+                val srcY_mp = (y.toFloat() / (outH - 1).coerceAtLeast(1)) * (mH - 1)
+                val y0_mp = srcY_mp.toInt().coerceIn(0, mH - 1)
+                val y1_mp = (y0_mp + 1).coerceIn(0, mH - 1)
+                val fy_mp = srcY_mp - y0_mp
+
+                val srcY_dl = (y.toFloat() / (outH - 1).coerceAtLeast(1)) * (dH - 1)
+                val y0_dl = srcY_dl.toInt().coerceIn(0, dH - 1)
+                val y1_dl = (y0_dl + 1).coerceIn(0, dH - 1)
+                val fy_dl = srcY_dl - y0_dl
+
+                val row = y * outW
+                for (x in 0 until outW) {
+                    val srcX_mp = (x.toFloat() / (outW - 1).coerceAtLeast(1)) * (mW - 1)
+                    val x0_mp = srcX_mp.toInt().coerceIn(0, mW - 1)
+                    val x1_mp = (x0_mp + 1).coerceIn(0, mW - 1)
+                    val fx_mp = srcX_mp - x0_mp
+
+                    val v00_m = mMask!![y0_mp * mW + x0_mp]
+                    val v10_m = mMask[y0_mp * mW + x1_mp]
+                    val v01_m = mMask[y1_mp * mW + x0_mp]
+                    val v11_m = mMask[y1_mp * mW + x1_mp]
+                    val mVal = (v00_m + (v10_m - v00_m) * fx_mp) * (1f - fy_mp) +
+                               (v01_m + (v11_m - v01_m) * fx_mp) * fy_mp
+
+                    val srcX_dl = (x.toFloat() / (outW - 1).coerceAtLeast(1)) * (dW - 1)
+                    val x0_dl = srcX_dl.toInt().coerceIn(0, dW - 1)
+                    val x1_dl = (x0_dl + 1).coerceIn(0, dW - 1)
+                    val fx_dl = srcX_dl - x0_dl
+
+                    val v00_d = dMask!![y0_dl * dW + x0_dl]
+                    val v10_d = dMask[y0_dl * dW + x1_dl]
+                    val v01_d = dMask[y1_dl * dW + x0_dl]
+                    val v11_d = dMask[y1_dl * dW + x1_dl]
+                    val dVal = (v00_d + (v10_d - v00_d) * fx_dl) * (1f - fy_dl) +
+                               (v01_d + (v11_d - v01_d) * fx_dl) * fy_dl
+
+                    fused[row + x] = max(mVal, dVal).coerceIn(0f, 1f)
+                }
+            }
+            return Triple(fused, outW, outH)
+        }
+
+        /**
          * Morphologically dilates (expansion > 0) or erodes (expansion < 0) [rawMask]
          * by [expansionPixels] pixels using a fast separable min/max 2D filter.
          */
@@ -875,7 +961,10 @@ class SegmentationEngine(private val context: Context) {
         )
 
         // 2. Execute Universal AI Cascade for foreground extraction
-        var (rawMask, maskW, maskH) = executeUniversalCascade(inferenceBmp, depthResult, clockZDepth)
+        val cascade = executeUniversalCascade(inferenceBmp, depthResult, clockZDepth)
+        var rawMask = cascade.fusedMask
+        var maskW = cascade.maskWidth
+        var maskH = cascade.maskHeight
 
         // Saliency check
         var fgCount = 0
@@ -1036,83 +1125,118 @@ class SegmentationEngine(private val context: Context) {
             normalizedDepth = depthResult?.normalizedDepth,
             depthWidth = depthResult?.depthWidth ?: maskW,
             depthHeight = depthResult?.depthHeight ?: maskH,
-            depthLayerCount = depthLayerCount
+            depthLayerCount = depthLayerCount,
+            mediaPipeMask = cascade.mediaPipeMask,
+            deepLabMask = cascade.deepLabMask
         )
     }
+
+    data class CascadeResult(
+        val fusedMask: FloatArray,
+        val maskWidth: Int,
+        val maskHeight: Int,
+        val mediaPipeMask: Bitmap? = null,
+        val deepLabMask: Bitmap? = null
+    )
 
     /**
      * Universal AI Cascade (Flagship Pipeline):
      * Seamlessly unifies all scenarios:
      * 1. Runs Depth Anything V2 for 3D continuous geometry and metric scene depth.
-     * 2. Checks MediaPipe Selfie Multiclass for portraits (hair, face, skin, clothes).
-     * 3. Checks DeepLab v3 MobileNet for pets (dogs, cats, birds) and objects (vehicles, etc.).
-     * 4. If portrait/pet/object detected, anchors semantic subject in foreground and combines with depth.
-     * 5. If pure landscape/architecture/scene, continuous 3D depth slices foreground at clockZDepth.
+     * 2. Checks MediaPipe Selfie Multiclass for high-precision portrait details (hair, face, skin, clothes).
+     * 3. Checks DeepLab v3 MobileNet for full bodies, outstretched limbs, background groups, pets, and objects.
+     * 4. Fuses both semantic masks with max-combine to capture close-up faces AND background limbs/people.
+     * 5. If pure landscape/architecture/scene, continuous 3D depth slices foreground at naturalDepthGap.
      * 6. Solid-core hole-filling and Fast Guided Matting against RGB source luminance snap edges to 1px precision.
      */
     private fun executeUniversalCascade(
         bitmap: Bitmap,
         depthResult: DepthAnythingEngine.DepthResult?,
         clockZDepth: Float
-    ): Triple<FloatArray, Int, Int> {
-        // 1. Check for human presence (hair, skin, clothes, accessories)
+    ): CascadeResult {
+        // 1. Run MediaPipe Selfie Multiclass for fine hair/face/portrait details
         val multiclass = multiclassSegmenter.segment(bitmap)
         val mW = multiclass?.second ?: 0
         val mH = multiclass?.third ?: 0
+        val mMask = multiclass?.first
         var personPixels = 0
-        if (multiclass != null && mW > 0 && mH > 0) {
-            val mask = multiclass.first
+        if (mMask != null && mW > 0 && mH > 0) {
             val total = mW * mH
             for (i in 0 until total) {
-                if (mask[i] >= 0.35f) personPixels++
+                if (mMask[i] >= 0.35f) personPixels++
             }
         }
-        val hasPerson = (mW > 0 && mH > 0 && (personPixels.toFloat() / (mW * mH)) >= 0.03f)
+        val hasMpPerson = (mW > 0 && mH > 0 && (personPixels.toFloat() / (mW * mH)) >= 0.02f)
+        val mpMaskBmp = if (mMask != null && mW > 0 && mH > 0) {
+            createGrayscaleMaskBitmap(mMask, mW, mH)
+        } else null
 
-        // 2. If no humans detected, check DeepLab for pets (dogs, cats, birds) and objects (vehicles, etc.)
-        val deepLab = if (!hasPerson) deepLabSegmenter.segment(bitmap) else null
-        val dW_dl = deepLab?.second ?: 0
-        val dH_dl = deepLab?.third ?: 0
+        // 2. Run DeepLab v3 MobileNet unconditionally for full-body, outstretched limbs, background groups, pets & objects
+        val deepLab = deepLabSegmenter.segment(bitmap)
+        val dW = deepLab?.second ?: 0
+        val dH = deepLab?.third ?: 0
+        val dMask = deepLab?.first
         var objPixels = 0
-        if (!hasPerson && deepLab != null && dW_dl > 0 && dH_dl > 0) {
-            val mask = deepLab.first
-            val total = dW_dl * dH_dl
+        if (dMask != null && dW > 0 && dH > 0) {
+            val total = dW * dH
             for (i in 0 until total) {
-                if (mask[i] >= 0.35f) objPixels++
+                if (dMask[i] >= 0.35f) objPixels++
             }
         }
-        val hasObject = (!hasPerson && dW_dl > 0 && dH_dl > 0 && (objPixels.toFloat() / (dW_dl * dH_dl)) >= 0.03f)
+        val hasDlSubject = (dW > 0 && dH > 0 && (objPixels.toFloat() / (dW * dH)) >= 0.02f)
+        val dlMaskBmp = if (dMask != null && dW > 0 && dH > 0) {
+            createGrayscaleMaskBitmap(dMask, dW, dH)
+        } else null
 
-        return when {
-            hasPerson -> {
-                // People detected: return pure semantic person matte (hair, face, skin, clothes).
-                // Zero ground/beach/floor contamination!
-                Triple(multiclass!!.first, mW, mH)
-            }
-            hasObject -> {
-                // Pet or object detected: return pure semantic pet/object matte.
-                Triple(deepLab!!.first, dW_dl, dH_dl)
-            }
-            depthResult != null -> {
-                // Pure Landscape / Architecture / Nature (e.g. palm tree, mountains, buildings):
-                // Depth Anything V2 3D geometry clusters the prominent foreground structure
-                // at the natural depth valley, preserving the entire foreground entity as 100% solid.
-                val dW = depthResult.depthWidth
-                val dH = depthResult.depthHeight
-                val normDepth = depthResult.normalizedDepth
-                val naturalGap = depthResult.naturalDepthGap.coerceIn(0.20f, 0.70f)
-                val total = dW * dH
-                val landscapeFg = FloatArray(total)
-                for (i in 0 until total) {
-                    val d = normDepth[i]
-                    landscapeFg[i] = if (d >= naturalGap) 1.0f else 0.0f
-                }
-                Triple(landscapeFg, dW, dH)
-            }
-            else -> {
-                computeUniversalSaliencyMask(bitmap)
-            }
+        // 3. Dual-Model Semantic Fusion
+        if (hasMpPerson || hasDlSubject) {
+            val (fused, fW, fH) = fuseSemanticMasks(
+                mMask = if (hasMpPerson) mMask else null,
+                mW = mW,
+                mH = mH,
+                dMask = if (hasDlSubject) dMask else null,
+                dW = dW,
+                dH = dH
+            )
+            return CascadeResult(
+                fusedMask = fused,
+                maskWidth = fW,
+                maskHeight = fH,
+                mediaPipeMask = mpMaskBmp,
+                deepLabMask = dlMaskBmp
+            )
         }
+
+        // 4. Pure Landscape / Architecture / Nature fallback: Depth Anything V2
+        if (depthResult != null) {
+            val dW_da = depthResult.depthWidth
+            val dH_da = depthResult.depthHeight
+            val normDepth = depthResult.normalizedDepth
+            val naturalGap = depthResult.naturalDepthGap.coerceIn(0.20f, 0.70f)
+            val total = dW_da * dH_da
+            val landscapeFg = FloatArray(total)
+            for (i in 0 until total) {
+                val d = normDepth[i]
+                landscapeFg[i] = if (d >= naturalGap) 1.0f else 0.0f
+            }
+            return CascadeResult(
+                fusedMask = landscapeFg,
+                maskWidth = dW_da,
+                maskHeight = dH_da,
+                mediaPipeMask = mpMaskBmp,
+                deepLabMask = dlMaskBmp
+            )
+        }
+
+        // 5. Universal Saliency fallback
+        val universal = computeUniversalSaliencyMask(bitmap)
+        return CascadeResult(
+            fusedMask = universal.first,
+            maskWidth = universal.second,
+            maskHeight = universal.third,
+            mediaPipeMask = mpMaskBmp,
+            deepLabMask = dlMaskBmp
+        )
     }
 
     /**

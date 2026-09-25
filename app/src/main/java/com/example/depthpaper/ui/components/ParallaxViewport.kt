@@ -54,6 +54,8 @@ fun ParallaxViewport(
     cutoutBmp: Bitmap?,
     backgroundBmp: Bitmap?,
     depthBmp: Bitmap?,
+    mediaPipeBmp: Bitmap? = null,
+    deepLabBmp: Bitmap? = null,
     simulatedTiltX: Float,
     simulatedTiltY: Float,
     onTiltChanged: (Float, Float) -> Unit,
@@ -287,10 +289,44 @@ fun ParallaxViewport(
                 return@Canvas
             }
 
-            // --- 3D Depth Map Inspection Mode ---
-            if (previewSurface == PreviewSurface.DEPTH_MAP) {
-                drawRect(Color.Black, size = size)
-                val targetBmp = depthBmp ?: sourceBmp
+            // --- Diagnostic Map & Plate Inspection Modes ---
+            val isInspectionMode = previewSurface in listOf(
+                PreviewSurface.DEPTH_MAP,
+                PreviewSurface.MEDIAPIPE_MASK,
+                PreviewSurface.DEEPLAB_MASK,
+                PreviewSurface.CUTOUT,
+                PreviewSurface.INPAINTED_BG
+            )
+
+            if (isInspectionMode) {
+                if (previewSurface == PreviewSurface.CUTOUT) {
+                    // Dark subtle checkerboard grid to inspect alpha transparency
+                    val squareSize = 36f
+                    val cols = (canvasW / squareSize).toInt() + 1
+                    val rows = (canvasH / squareSize).toInt() + 1
+                    for (r in 0 until rows) {
+                        for (c in 0 until cols) {
+                            val color = if ((r + c) % 2 == 0) Color(0xFF1E1E2E) else Color(0xFF141422)
+                            drawRect(
+                                color = color,
+                                topLeft = androidx.compose.ui.geometry.Offset(c * squareSize, r * squareSize),
+                                size = androidx.compose.ui.geometry.Size(squareSize, squareSize)
+                            )
+                        }
+                    }
+                } else {
+                    drawRect(Color.Black, size = size)
+                }
+
+                val (targetBmp, labelText) = when (previewSurface) {
+                    PreviewSurface.DEPTH_MAP -> (depthBmp ?: sourceBmp) to "3D DEPTH MAP (WARM = NEAR  COOL = FAR)"
+                    PreviewSurface.MEDIAPIPE_MASK -> (mediaPipeBmp ?: sourceBmp) to "FACE & HAIR MASK (MEDIAPIPE MULTICLASS)"
+                    PreviewSurface.DEEPLAB_MASK -> (deepLabBmp ?: sourceBmp) to "BODY & OBJECT MASK (DEEPLAB V3)"
+                    PreviewSurface.CUTOUT -> (cutoutBmp ?: sourceBmp) to "FOREGROUND CUTOUT (ALPHA MATTE)"
+                    PreviewSurface.INPAINTED_BG -> (backgroundBmp ?: sourceBmp) to "INPAINTED BACKGROUND PLATE"
+                    else -> null to ""
+                }
+
                 targetBmp?.let { bmp ->
                     val transform = ParallaxMath.computeCenterCropTransform(
                         canvasW = canvasW,
@@ -320,11 +356,11 @@ fun ParallaxViewport(
                 drawIntoCanvas { nativeCanvas ->
                     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                         color = android.graphics.Color.WHITE
-                        textSize = canvasW * 0.038f
+                        textSize = canvasW * 0.035f
                         textAlign = android.graphics.Paint.Align.CENTER
                         setShadowLayer(10f, 0f, 2f, android.graphics.Color.BLACK)
                     }
-                    nativeCanvas.nativeCanvas.drawText("3D DEPTH MAP (WARM = NEAR  COOL = FAR)", canvasW * 0.5f, canvasH * 0.94f, paint)
+                    nativeCanvas.nativeCanvas.drawText(labelText, canvasW * 0.5f, canvasH * 0.94f, paint)
                 }
                 return@Canvas
             }

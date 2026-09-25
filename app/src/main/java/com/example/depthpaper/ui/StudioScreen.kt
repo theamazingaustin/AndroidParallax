@@ -230,87 +230,174 @@ fun StudioScreen(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxHeight(0.96f)
+                    .fillMaxHeight(0.98f)
                     .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
-                        .clip(RoundedCornerShape(26.dp))
-                        .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
-                        .background(Color.Black)
-                ) {
-                    ParallaxViewport(
-                        project = state.currentProject,
-                        previewSurface = state.previewSurface,
-                        sourceBmp = state.sourceBitmap,
-                        cutoutBmp = state.cutoutBitmap,
-                        backgroundBmp = state.backgroundBitmap,
-                        depthBmp = state.depthBitmap,
-                        simulatedTiltX = state.simulatedTiltX,
-                        simulatedTiltY = state.simulatedTiltY,
-                        onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
-                        onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
-                        onImageTransformChanged = { scale, panX, panY ->
-                            viewModel.updateImageTransform(scale, panX, panY)
-                        },
-                        onTapDepthPoint = { normX, normY ->
-                            viewModel.onTapPreviewCoordinate(normX, normY)
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                // Intermediate Diagnostic Map Selector above preview (Pipeline order)
+                val mapOptions = listOf(
+                    PreviewSurface.LOCK_SCREEN to "Live",
+                    PreviewSurface.DEPTH_MAP to "Depth",
+                    PreviewSurface.MEDIAPIPE_MASK to "Face MP",
+                    PreviewSurface.DEEPLAB_MASK to "Body DL",
+                    PreviewSurface.CUTOUT to "Cutout",
+                    PreviewSurface.INPAINTED_BG to "Infill"
+                )
 
-                    // Processing overlay
-                    if (state.isProcessing) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.65f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = state.statusMessage ?: "AI processing on-device...",
-                                    color = Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
+                Row(
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    mapOptions.forEach { (surface, label) ->
+                        val isSelected = state.previewSurface == surface
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E1E2E),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else Color(0xFF2E2E3E)),
+                            modifier = Modifier.clickable {
+                                viewModel.setPreviewSurface(
+                                    if (isSelected && surface != PreviewSurface.LOCK_SCREEN) PreviewSurface.LOCK_SCREEN else surface
                                 )
                             }
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
-                    }
-
-                    // Drag hint pill at bottom of viewport
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 12.dp)
-                    ) {
-                        Text(
-                            text = if (state.previewSurface == PreviewSurface.DEPTH_MAP) "3D Depth Map Active • Tilt to Inspect" else "Touch & drag clock to reposition",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(phoneAspectRatio, matchHeightConstraintsFirst = true)
+                            .clip(RoundedCornerShape(26.dp))
+                            .border(2.dp, Color(0xFF28283E), RoundedCornerShape(26.dp))
+                            .background(Color.Black)
+                    ) {
+                        ParallaxViewport(
+                            project = state.currentProject,
+                            previewSurface = state.previewSurface,
+                            sourceBmp = state.sourceBitmap,
+                            cutoutBmp = state.cutoutBitmap,
+                            backgroundBmp = state.backgroundBitmap,
+                            depthBmp = state.depthBitmap,
+                            mediaPipeBmp = state.mediaPipeBitmap,
+                            deepLabBmp = state.deepLabBitmap,
+                            simulatedTiltX = state.simulatedTiltX,
+                            simulatedTiltY = state.simulatedTiltY,
+                            onTiltChanged = { x, y -> viewModel.updateTilt(x, y) },
+                            onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
+                            onImageTransformChanged = { scale, panX, panY ->
+                                viewModel.updateImageTransform(scale, panX, panY)
+                            },
+                            onTapDepthPoint = { normX, normY ->
+                                viewModel.onTapPreviewCoordinate(normX, normY)
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
 
-                // Vertical Clock Z Slider beside preview
-                VerticalClockZSlider(
-                    clockZDepth = state.currentProject.clockZDepth,
-                    onZDepthChanged = { viewModel.onClockZDepthChanged(it) },
-                    modifier = Modifier.fillMaxHeight(0.60f)
-                )
+                        // Processing overlay
+                        if (state.isProcessing) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.65f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CircularProgressIndicator(color = Color(0xFF00E5FF), strokeWidth = 3.dp)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = state.statusMessage ?: "AI processing on-device...",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        // Drag hint pill at bottom of viewport
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 12.dp)
+                        ) {
+                            Text(
+                                text = when (state.previewSurface) {
+                                    PreviewSurface.LOCK_SCREEN -> "Touch & drag clock to reposition"
+                                    PreviewSurface.DEPTH_MAP -> "3D Depth Map Active • Tilt to Inspect"
+                                    PreviewSurface.MEDIAPIPE_MASK -> "Face MP Mask • Hair & Facial Contours"
+                                    PreviewSurface.DEEPLAB_MASK -> "Body DL Mask • Limbs & Background People"
+                                    PreviewSurface.CUTOUT -> "Cutout Active • Alpha Transparency"
+                                    PreviewSurface.INPAINTED_BG -> "Infill Active • Background Inpainting"
+                                    PreviewSurface.HOME_SCREEN -> "Home Screen Simulation Active"
+                                    PreviewSurface.AOD -> "Always-On Display Active"
+                                },
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Controls column beside preview: 3D toggle button directly above Z-slider
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxHeight(0.68f)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color(0xFF00E5FF) else Color(0xFF1E1E2E),
+                            border = BorderStroke(1.dp, if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color(0xFF00E5FF) else Color(0xFF3A3A4C)),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable {
+                                    viewModel.setPreviewSurface(
+                                        if (state.previewSurface == PreviewSurface.DEPTH_MAP) PreviewSurface.LOCK_SCREEN else PreviewSurface.DEPTH_MAP
+                                    )
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "3D",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color.Black else Color.White
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        VerticalClockZSlider(
+                            clockZDepth = state.currentProject.clockZDepth,
+                            onZDepthChanged = { viewModel.onClockZDepthChanged(it) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
         }
     }
@@ -590,12 +677,6 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     onClick = { viewModel.setPreviewSurface(PreviewSurface.AOD) },
                     label = { Text("AOD (OLED)", fontSize = 11.sp) }
                 )
-                FilterChip(
-                    selected = state.previewSurface == PreviewSurface.DEPTH_MAP,
-                    onClick = { viewModel.setPreviewSurface(PreviewSurface.DEPTH_MAP) },
-                    label = { Text("3D Depth Map", fontSize = 11.sp) },
-                    leadingIcon = { Icon(Icons.Default.ViewInAr, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                )
             }
             Text(
                 text = when (state.previewSurface) {
@@ -603,6 +684,10 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     PreviewSurface.HOME_SCREEN -> "Simulating launcher with icons. Clock is auto-hidden to prevent clutter."
                     PreviewSurface.AOD -> "Power-saving pure black OLED display."
                     PreviewSurface.DEPTH_MAP -> "Visualizing AI continuous depth map (white = foreground, dark = background). Tilt phone to inspect depth planes."
+                    PreviewSurface.MEDIAPIPE_MASK -> "Visualizing MediaPipe Selfie Multiclass high-detail hair and facial contour mask."
+                    PreviewSurface.DEEPLAB_MASK -> "Visualizing DeepLab v3 MobileNet body, limbs, pets, and object mask."
+                    PreviewSurface.CUTOUT -> "Visualizing foreground alpha cutout on transparency grid."
+                    PreviewSurface.INPAINTED_BG -> "Visualizing inpainted background plate."
                 },
                 fontSize = 11.sp,
                 color = Color.LightGray
