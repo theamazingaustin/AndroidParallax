@@ -14,7 +14,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -36,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import com.example.depthpaper.core.ParallaxMath
 import com.example.depthpaper.core.SensorFilter
 import com.example.depthpaper.data.ClockFontStyle
 import com.example.depthpaper.data.RenderMode
@@ -45,7 +45,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
@@ -77,6 +76,10 @@ fun ParallaxViewport(
     var currentPanX by remember(project.id, project.imagePanX) { mutableFloatStateOf(project.imagePanX) }
     var currentPanY by remember(project.id, project.imagePanY) { mutableFloatStateOf(project.imagePanY) }
 
+    val currentSimulatedTiltX by rememberUpdatedState(simulatedTiltX)
+    val currentSimulatedTiltY by rememberUpdatedState(simulatedTiltY)
+    val currentMotionConfig by rememberUpdatedState(project.motionConfig)
+
     LaunchedEffect(project.lockScreenConfig.horizontalOffsetPercent, project.lockScreenConfig.verticalOffsetPercent) {
         if (!isDraggingClock) {
             currentClockX = project.lockScreenConfig.horizontalOffsetPercent
@@ -84,14 +87,13 @@ fun ParallaxViewport(
         }
     }
 
-    val currentMotionConfig by rememberUpdatedState(project.motionConfig)
-
     // Gyroscope tracking (runs continuously without disposing on project metadata updates)
     DisposableEffect(Unit) {
         val mainHandler = Handler(Looper.getMainLooper())
         val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-        val rotSensor = sm?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-            ?: sm?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+        // Priority: GAME_ROTATION_VECTOR has no magnetometer drift (immune to magnetic phone cases & wireless chargers)
+        val rotSensor = sm?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+            ?: sm?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: sm?.getDefaultSensor(Sensor.TYPE_GRAVITY)
             ?: sm?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
@@ -103,7 +105,7 @@ fun ParallaxViewport(
                 sensorFilter.maxAngleDegrees = cfg.maxTiltAngle
 
                 val (rawX, rawY) = when (event.sensor.type) {
-                    Sensor.TYPE_ROTATION_VECTOR, Sensor.TYPE_GAME_ROTATION_VECTOR -> {
+                    Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_ROTATION_VECTOR -> {
                         val rotMatrix = FloatArray(9)
                         SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
                         val orientation = FloatArray(3)
@@ -203,8 +205,8 @@ fun ParallaxViewport(
                                 val dx = (dragAmount.x / size.width) * 3f
                                 val dy = (dragAmount.y / size.height) * 3f
                                 onTiltChanged(
-                                    (simulatedTiltX + dx).coerceIn(-1f, 1f),
-                                    (simulatedTiltY + dy).coerceIn(-1f, 1f)
+                                    (currentSimulatedTiltX + dx).coerceIn(-1f, 1f),
+                                    (currentSimulatedTiltY + dy).coerceIn(-1f, 1f)
                                 )
                                 change.consume()
                             }
@@ -215,23 +217,24 @@ fun ParallaxViewport(
                         onClockPositionChanged(currentClockX, currentClockY)
                     } else if (!isTwoFinger && totalDragDistance < 15f && onTapDepthPoint != null) {
                         // User tapped on preview to pick 3D depth layer!
-                        // Map touch coordinate on canvas back to original image normalized coordinate
                         val canvasW = size.width.toFloat()
                         val canvasH = size.height.toFloat()
                         val refBmp = sourceBmp ?: backgroundBmp ?: cutoutBmp ?: depthBmp
                         val imgW = refBmp?.width?.toFloat() ?: canvasW
                         val imgH = refBmp?.height?.toFloat() ?: canvasH
-                        val overscan = 1.08f
-                        val scale = max((canvasW * overscan) / imgW, (canvasH * overscan) / imgH) * currentScale
-                        val drawW = imgW * scale
-                        val drawH = imgH * scale
-                        val panOffsetX = canvasW * currentPanX
-                        val panOffsetY = canvasH * currentPanY
-                        val baseLeft = (canvasW - drawW) / 2f + panOffsetX
-                        val baseTop = (canvasH - drawH) / 2f + panOffsetY
 
-                        val normX = ((downPos.x - baseLeft) / drawW).coerceIn(0f, 1f)
-                        val normY = ((downPos.y - baseTop) / drawH).coerceIn(0f, 1f)
+                        val transform = ParallaxMath.computeCenterCropTransform(
+                            canvasW = canvasW,
+                            canvasH = canvasH,
+                            imgW = imgW,
+                            imgH = imgH,
+                            zoomScale = currentScale,
+                            panX = currentPanX,
+                            panY = currentPanY
+                        )
+
+                        val normX = ((downPos.x - transform.baseLeft) / transform.drawW).coerceIn(0f, 1f)
+                        val normY = ((downPos.y - transform.baseTop) / transform.drawH).coerceIn(0f, 1f)
                         onTapDepthPoint.invoke(normX, normY)
                     }
 
@@ -290,16 +293,23 @@ fun ParallaxViewport(
                 drawRect(Color.Black, size = size)
                 val targetBmp = depthBmp ?: sourceBmp
                 targetBmp?.let { bmp ->
-                    val overscan = 1.08f
-                    val scale = max((canvasW * overscan) / bmp.width, (canvasH * overscan) / bmp.height) * currentScale
-                    val drawW = (bmp.width * scale).roundToInt()
-                    val drawH = (bmp.height * scale).roundToInt()
-                    val panOffsetX = (canvasW * currentPanX).roundToInt()
-                    val panOffsetY = (canvasH * currentPanY).roundToInt()
-                    val baseLeft = ((canvasW - drawW) / 2f).roundToInt() + panOffsetX
-                    val baseTop = ((canvasH - drawH) / 2f).roundToInt() + panOffsetY
-                    val shiftX = totalTiltX * canvasW * 0.04f * project.motionConfig.parallaxIntensity
-                    val shiftY = totalTiltY * canvasW * 0.04f * project.motionConfig.parallaxIntensity
+                    val transform = ParallaxMath.computeCenterCropTransform(
+                        canvasW = canvasW,
+                        canvasH = canvasH,
+                        imgW = bmp.width.toFloat(),
+                        imgH = bmp.height.toFloat(),
+                        zoomScale = currentScale,
+                        panX = currentPanX,
+                        panY = currentPanY
+                    )
+                    val drawW = transform.drawW.roundToInt()
+                    val drawH = transform.drawH.roundToInt()
+                    val baseLeft = transform.baseLeft.roundToInt()
+                    val baseTop = transform.baseTop.roundToInt()
+
+                    val maxShift = ParallaxMath.calculateMaxShift(canvasW, project.motionConfig.parallaxIntensity)
+                    val shiftX = totalTiltX * maxShift
+                    val shiftY = totalTiltY * maxShift
 
                     drawImage(
                         image = bmp.asImageBitmap(),
@@ -321,8 +331,8 @@ fun ParallaxViewport(
             }
 
             // --- Normal & Parallax Rendering ---
-            val intensity = project.motionConfig.parallaxIntensity.coerceAtLeast(0.3f)
-            val maxShift = canvasW * 0.12f * intensity
+            // ParallaxMath guarantees strictly 0px motion when intensity <= 0f
+            val maxShift = ParallaxMath.calculateMaxShift(canvasW, project.motionConfig.parallaxIntensity)
             val shiftX = totalTiltX * maxShift
             val shiftY = totalTiltY * maxShift
 
@@ -331,35 +341,40 @@ fun ParallaxViewport(
             val imgW = refBmp?.width?.toFloat() ?: 1000f
             val imgH = refBmp?.height?.toFloat() ?: 1000f
 
-            val overscan = 1.08f
-            val scale = max((canvasW * overscan) / imgW, (canvasH * overscan) / imgH) * currentScale
-            val drawW = (imgW * scale).roundToInt()
-            val drawH = (imgH * scale).roundToInt()
-            val panOffsetX = (canvasW * currentPanX).roundToInt()
-            val panOffsetY = (canvasH * currentPanY).roundToInt()
-            val baseLeft = ((canvasW - drawW) / 2f).roundToInt() + panOffsetX
-            val baseTop = ((canvasH - drawH) / 2f).roundToInt() + panOffsetY
+            val transform = ParallaxMath.computeCenterCropTransform(
+                canvasW = canvasW,
+                canvasH = canvasH,
+                imgW = imgW,
+                imgH = imgH,
+                zoomScale = currentScale,
+                panX = currentPanX,
+                panY = currentPanY
+            )
+            val drawW = transform.drawW.roundToInt()
+            val drawH = transform.drawH.roundToInt()
+            val baseLeft = transform.baseLeft.roundToInt()
+            val baseTop = transform.baseTop.roundToInt()
             val drawSize = IntSize(drawW, drawH)
 
             // Positive differential parallax:
-            // Background is furthest away (-0.25x)
-            // Clock is midground (+0.35x)
-            // Cutout subject is nearest (+0.75x)
+            // Background is furthest away (-0.20x)
+            // Clock is midground (-0.20x to +0.70x)
+            // Cutout subject is nearest (+0.70x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
-            val bgShiftX = if (isLayeredMode) shiftX * -0.25f else shiftX * 0.20f
-            val bgShiftY = if (isLayeredMode) shiftY * -0.25f else shiftY * 0.20f
-            val clockDepthFactor = (-0.20f + 0.85f * project.clockZDepth).coerceIn(-0.25f, 0.75f)
+            val isInFrontOfEverything = project.clockZDepth >= 0.999f
+
+            val bgShiftX = if (isLayeredMode) shiftX * ParallaxMath.BG_PARALLAX_MULTIPLIER else shiftX * 0.20f
+            val bgShiftY = if (isLayeredMode) shiftY * ParallaxMath.BG_PARALLAX_MULTIPLIER else shiftY * 0.20f
+            val clockDepthFactor = ParallaxMath.calculateClockDepthFactor(project.clockZDepth)
             val clockParallaxShiftX = shiftX * clockDepthFactor
             val clockParallaxShiftY = shiftY * clockDepthFactor
-            val fgShiftX = shiftX * 0.75f
-            val fgShiftY = shiftY * 0.75f
+            val fgShiftX = shiftX * ParallaxMath.FG_PARALLAX_MULTIPLIER
+            val fgShiftY = shiftY * ParallaxMath.FG_PARALLAX_MULTIPLIER
 
             val bgLeft = baseLeft + bgShiftX.roundToInt()
             val bgTop = baseTop + bgShiftY.roundToInt()
             val fgLeft = baseLeft + fgShiftX.roundToInt()
             val fgTop = baseTop + fgShiftY.roundToInt()
-
-            val isInFrontOfEverything = project.clockZDepth >= 0.999f
 
             // 2. Draw Lock Screen Clock definition
             val showClock = previewSurface == PreviewSurface.LOCK_SCREEN || !project.homeScreenConfig.hideClockOnHomeScreen
@@ -381,14 +396,7 @@ fun ParallaxViewport(
                             color = cfg.clockColorHex.toInt()
                             textSize = canvasW * 0.24f * cfg.clockScale
                             textAlign = android.graphics.Paint.Align.CENTER
-                            typeface = when (cfg.fontStyle) {
-                                ClockFontStyle.ROUNDED_BOLD -> Typeface.create("sans-serif-medium", Typeface.BOLD)
-                                ClockFontStyle.SERIF_CLASSIC -> Typeface.create("serif", Typeface.BOLD)
-                                ClockFontStyle.MODERN_HEAVY -> Typeface.create("sans-serif-black", Typeface.BOLD)
-                                ClockFontStyle.ELEGANT_THIN -> Typeface.create("sans-serif-thin", Typeface.NORMAL)
-                                ClockFontStyle.STENCIL_DISPLAY -> Typeface.create("casual", Typeface.BOLD)
-                                ClockFontStyle.CYBER_MONO -> Typeface.create("monospace", Typeface.BOLD)
-                            }
+                            typeface = ParallaxMath.getTypeface(cfg.fontStyle)
                             setShadowLayer(20f, 0f, 4f, android.graphics.Color.argb(160, 0, 0, 0))
                         }
 
@@ -426,7 +434,13 @@ fun ParallaxViewport(
             }
 
             // 1. Draw Background Photo Plate
-            val bgBmp = if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
+            // When Clock Z is in front of everything, draw the PRISTINE source photo (no inpainting smudge!)
+            val bgBmp = if (isInFrontOfEverything) {
+                sourceBmp ?: backgroundBmp
+            } else {
+                if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
+            }
+
             bgBmp?.let { bmp ->
                 drawImage(
                     image = bmp.asImageBitmap(),
@@ -448,8 +462,8 @@ fun ParallaxViewport(
                 drawClock()
             }
 
-            // 3. Draw Foreground Cutout Plate (drawn ONLY in Layered 2D mode)
-            if (isLayeredMode) {
+            // 3. Draw Foreground Cutout Plate (drawn ONLY in Layered 2D mode when clock is behind subject)
+            if (!isInFrontOfEverything && isLayeredMode) {
                 cutoutBmp.let { bmp ->
                     drawImage(
                         image = bmp.asImageBitmap(),

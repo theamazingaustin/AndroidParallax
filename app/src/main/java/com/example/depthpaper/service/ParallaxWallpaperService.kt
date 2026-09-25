@@ -1,35 +1,40 @@
 package com.example.depthpaper.service
 
 import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import com.example.depthpaper.core.AppLogger
+import com.example.depthpaper.core.ParallaxMath
 import com.example.depthpaper.core.SensorFilter
-import com.example.depthpaper.data.ClockFontStyle
 import com.example.depthpaper.data.ProjectRepository
 import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.max
-import kotlin.math.min
 
 class ParallaxWallpaperService : WallpaperService() {
+
+    companion object {
+        const val ACTION_WALLPAPER_UPDATED = "com.example.depthpaper.ACTION_WALLPAPER_UPDATED"
+    }
 
     override fun onCreateEngine(): Engine {
         return ParallaxEngine()
@@ -45,6 +50,7 @@ class ParallaxWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
 
         private var activeProject: WallpaperProject? = null
+        private var sourceBitmap: Bitmap? = null
         private var bgBitmap: Bitmap? = null
         private var fgBitmap: Bitmap? = null
         private var depthBitmap: Bitmap? = null
@@ -77,16 +83,42 @@ class ParallaxWallpaperService : WallpaperService() {
             }
         }
 
+        private val wallpaperUpdateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACTION_WALLPAPER_UPDATED) {
+                    AppLogger.i("WallpaperService", "Received ACTION_WALLPAPER_UPDATED broadcast, reloading active project")
+                    loadActiveProject(forceReload = true)
+                    drawFrame()
+                }
+            }
+        }
+
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
-            loadActiveProject()
+            loadActiveProject(forceReload = true)
+            val filter = IntentFilter(ACTION_WALLPAPER_UPDATED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(wallpaperUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(wallpaperUpdateReceiver, filter)
+            }
+        }
+
+        override fun onDestroy() {
+            super.onDestroy()
+            isVisible = false
+            unregisterSensors()
+            handler.removeCallbacks(drawRunnable)
+            try {
+                unregisterReceiver(wallpaperUpdateReceiver)
+            } catch (_: Exception) {}
         }
 
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
             isVisible = visible
             if (visible) {
-                loadActiveProject()
+                loadActiveProject(forceReload = false)
                 registerSensors()
                 handler.post(drawRunnable)
             } else {
@@ -117,7 +149,9 @@ class ParallaxWallpaperService : WallpaperService() {
 
         private fun registerSensors() {
             sensorManager?.let { sm ->
-                val rotSensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+                // Priority: GAME_ROTATION_VECTOR has no magnetometer drift (immune to magnetic phone cases & wireless chargers)
+                val rotSensor = sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+                    ?: sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
                     ?: sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
                 rotSensor?.let {
                     sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
@@ -133,13 +167,13 @@ class ParallaxWallpaperService : WallpaperService() {
             if (event == null || !isVisible) return
             val project = activeProject ?: return
 
-            if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+            if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
                 val rotMatrix = FloatArray(9)
                 SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
                 val orientation = FloatArray(3)
                 SensorManager.getOrientation(rotMatrix, orientation)
 
-                // Azimuth, pitch, roll in radians -> convert to degrees
+                // Pitch, roll in radians -> convert to degrees
                 val pitchDeg = Math.toDegrees(orientation[1].toDouble()).toFloat()
                 val rollDeg = Math.toDegrees(orientation[2].toDouble()).toFloat()
 
@@ -163,15 +197,16 @@ class ParallaxWallpaperService : WallpaperService() {
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-        private fun loadActiveProject() {
+        private fun loadActiveProject(forceReload: Boolean = false) {
             val proj = repository.getActiveProject()
-            if (proj != null && proj.id != activeProject?.id) {
+            if (proj != null && (forceReload || proj.id != activeProject?.id || proj.createdTimestamp != activeProject?.createdTimestamp)) {
                 activeProject = proj
                 AppLogger.i("WallpaperService", "Active project loaded: ${proj.title} (${proj.id}), mode=${proj.renderMode}")
-                bgBitmap = repository.loadBitmap(proj.inpaintedBackgroundPath) ?: repository.loadBitmap(proj.sourceImagePath)
+                sourceBitmap = repository.loadBitmap(proj.sourceImagePath)
+                bgBitmap = repository.loadBitmap(proj.inpaintedBackgroundPath) ?: sourceBitmap
                 fgBitmap = repository.loadBitmap(proj.cutoutImagePath)
                 depthBitmap = repository.loadBitmap(proj.depthMapPath)
-                AppLogger.i("WallpaperService", "Plates loaded: bg=${bgBitmap != null}, fg=${fgBitmap != null}, depth=${depthBitmap != null}")
+                AppLogger.i("WallpaperService", "Plates loaded: src=${sourceBitmap != null}, bg=${bgBitmap != null}, fg=${fgBitmap != null}, depth=${depthBitmap != null}")
             }
         }
 
@@ -205,7 +240,7 @@ class ParallaxWallpaperService : WallpaperService() {
             val showClock = isLocked || !project.homeScreenConfig.hideClockOnHomeScreen
 
             val intensity = project.motionConfig.parallaxIntensity
-            val maxShiftPx = w * 0.08f * intensity
+            val maxShiftPx = ParallaxMath.calculateMaxShift(w, intensity)
 
             // Add launcher page horizontal swipe offset
             val pageShift = if (project.motionConfig.swipeParallax) (launcherPageOffset - 0.5f) * maxShiftPx * 1.5f else 0f
@@ -213,51 +248,45 @@ class ParallaxWallpaperService : WallpaperService() {
             val tiltY = currentNormY * maxShiftPx
 
             // Center-crop aspect ratio calculation
-            val refBmp = bgBitmap ?: fgBitmap
+            val refBmp = sourceBitmap ?: bgBitmap ?: fgBitmap
             val imgW = refBmp?.width?.toFloat() ?: 1080f
             val imgH = refBmp?.height?.toFloat() ?: 2400f
 
-            val overscan = 1.08f
-            val scale = max((w * overscan) / imgW, (h * overscan) / imgH) * project.imageScale
-            val drawW = imgW * scale
-            val drawH = imgH * scale
-            val panOffsetX = w * project.imagePanX
-            val panOffsetY = h * project.imagePanY
-            val baseLeft = (w - drawW) / 2f + panOffsetX
-            val baseTop = (h - drawH) / 2f + panOffsetY
+            val transform = ParallaxMath.computeCenterCropTransform(
+                canvasW = w,
+                canvasH = h,
+                imgW = imgW,
+                imgH = imgH,
+                zoomScale = project.imageScale,
+                panX = project.imagePanX,
+                panY = project.imagePanY
+            )
 
-            val shiftX = tiltX
-            val shiftY = tiltY
-
-            // Positive differential parallax:
-            // Background is furthest away (-0.15x)
-            // Clock is midground (+0.30x)
-            // Cutout subject is nearest (+0.70x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && fgBitmap != null
-            val bgShiftX = if (isLayeredMode) shiftX * -0.15f else shiftX * 0.20f
-            val bgShiftY = if (isLayeredMode) shiftY * -0.15f else shiftY * 0.20f
-            val clockDepthFactor = (-0.15f + 0.80f * project.clockZDepth).coerceIn(-0.20f, 0.70f)
-            val clockShiftX = shiftX * clockDepthFactor
-            val clockShiftY = shiftY * clockDepthFactor
-            val fgShiftX = shiftX * 0.70f
-            val fgShiftY = shiftY * 0.70f
-
-            val bgDest = RectF(
-                baseLeft + bgShiftX,
-                baseTop + bgShiftY,
-                baseLeft + bgShiftX + drawW,
-                baseTop + bgShiftY + drawH
-            )
-            val fgDest = RectF(
-                baseLeft + fgShiftX,
-                baseTop + fgShiftY,
-                baseLeft + fgShiftX + drawW,
-                baseTop + fgShiftY + drawH
-            )
-
             val isInFrontOfEverything = project.clockZDepth >= 0.999f
 
-            // 2. Clock Layer definition
+            val bgShiftX = if (isLayeredMode) tiltX * ParallaxMath.BG_PARALLAX_MULTIPLIER else tiltX * 0.20f
+            val bgShiftY = if (isLayeredMode) tiltY * ParallaxMath.BG_PARALLAX_MULTIPLIER else tiltY * 0.20f
+            val clockDepthFactor = ParallaxMath.calculateClockDepthFactor(project.clockZDepth)
+            val clockShiftX = tiltX * clockDepthFactor
+            val clockShiftY = tiltY * clockDepthFactor
+            val fgShiftX = tiltX * ParallaxMath.FG_PARALLAX_MULTIPLIER
+            val fgShiftY = tiltY * ParallaxMath.FG_PARALLAX_MULTIPLIER
+
+            val bgDest = RectF(
+                transform.baseLeft + bgShiftX,
+                transform.baseTop + bgShiftY,
+                transform.baseLeft + bgShiftX + transform.drawW,
+                transform.baseTop + bgShiftY + transform.drawH
+            )
+            val fgDest = RectF(
+                transform.baseLeft + fgShiftX,
+                transform.baseTop + fgShiftY,
+                transform.baseLeft + fgShiftX + transform.drawW,
+                transform.baseTop + fgShiftY + transform.drawH
+            )
+
+            // Clock Layer definition
             val drawClockAction = {
                 if (showClock) {
                     val cfg = project.lockScreenConfig
@@ -276,14 +305,21 @@ class ParallaxWallpaperService : WallpaperService() {
                     // Main Time
                     clockPaint.color = cfg.clockColorHex.toInt()
                     clockPaint.textSize = w * 0.24f * cfg.clockScale
-                    clockPaint.typeface = getTypefaceForStyle(cfg.fontStyle)
+                    clockPaint.typeface = ParallaxMath.getTypeface(cfg.fontStyle)
                     val timeStr = timeFormat.format(Date())
                     canvas.drawText(timeStr, clockX, clockY, clockPaint)
                 }
             }
 
             // 1. Draw Background Layer
-            bgBitmap?.let { bmp ->
+            // When Clock Z is in front of everything, draw the pristine source photo (no inpainting smudge!)
+            val baseBmp = if (isInFrontOfEverything) {
+                sourceBitmap ?: bgBitmap
+            } else {
+                if (isLayeredMode) (bgBitmap ?: sourceBitmap) else (sourceBitmap ?: bgBitmap)
+            }
+
+            baseBmp?.let { bmp ->
                 canvas.drawBitmap(bmp, null, bgDest, null)
             } ?: run {
                 canvas.drawColor(Color.parseColor("#1A1A2E"))
@@ -296,13 +332,13 @@ class ParallaxWallpaperService : WallpaperService() {
                 canvas.drawRect(0f, 0f, w, h, dimPaint)
             }
 
-            // Midground clock
+            // Midground clock (drawn behind cutout subject only when not in front of everything)
             if (!isInFrontOfEverything && isLayeredMode) {
                 drawClockAction()
             }
 
-            // 3. Foreground Subject Cutout (drawn ONLY in Layered 2D mode)
-            if (isLayeredMode) {
+            // 3. Foreground Subject Cutout (drawn ONLY in Layered 2D mode when clock is behind subject)
+            if (!isInFrontOfEverything && isLayeredMode) {
                 fgBitmap?.let { bmp ->
                     canvas.drawBitmap(bmp, null, fgDest, null)
                 }
@@ -311,17 +347,6 @@ class ParallaxWallpaperService : WallpaperService() {
             // In 3D Perspective mode or when clock is in front of everything, draw clock on top
             if (isInFrontOfEverything || !isLayeredMode) {
                 drawClockAction()
-            }
-        }
-
-        private fun getTypefaceForStyle(style: ClockFontStyle): Typeface {
-            return when (style) {
-                ClockFontStyle.ROUNDED_BOLD -> Typeface.create("sans-serif-medium", Typeface.BOLD)
-                ClockFontStyle.SERIF_CLASSIC -> Typeface.create("serif", Typeface.BOLD)
-                ClockFontStyle.MODERN_HEAVY -> Typeface.create("sans-serif-black", Typeface.BOLD)
-                ClockFontStyle.ELEGANT_THIN -> Typeface.create("sans-serif-thin", Typeface.NORMAL)
-                ClockFontStyle.STENCIL_DISPLAY -> Typeface.create("casual", Typeface.BOLD)
-                ClockFontStyle.CYBER_MONO -> Typeface.create("monospace", Typeface.BOLD)
             }
         }
     }

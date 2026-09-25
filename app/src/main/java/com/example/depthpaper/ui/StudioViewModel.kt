@@ -70,7 +70,8 @@ class StudioViewModel(
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     private var saveJob: Job? = null
-    private var sliceJob: Job? = null
+    private var isSlicing = false
+    private var pendingSliceZ: Float? = null
     private var cachedNormalizedDepth: FloatArray? = null
     private var cachedDepthW: Int = 0
     private var cachedDepthH: Int = 0
@@ -607,26 +608,34 @@ class StudioViewModel(
             val dW = cachedDepthW
             val dH = cachedDepthH
             if (depth != null && dW > 0 && dH > 0) {
-                sliceJob?.cancel()
-                sliceJob = viewModelScope.launch(Dispatchers.Default) {
-                    try {
-                        val sliced = DepthSlicingEngine.sliceForegroundCutout(
-                            sourceBmp = src,
-                            normalizedDepth = depth,
-                            depthWidth = dW,
-                            depthHeight = dH,
-                            clockZDepth = newZ
-                        )
-                        if (sliced != null) {
-                            withContext(Dispatchers.Main) {
-                                _uiState.value = _uiState.value.copy(
-                                    cutoutBitmap = sliced,
-                                    currentProject = updatedMeta
+                pendingSliceZ = newZ
+                if (!isSlicing) {
+                    isSlicing = true
+                    viewModelScope.launch(Dispatchers.Default) {
+                        try {
+                            while (true) {
+                                val targetZ = pendingSliceZ ?: break
+                                pendingSliceZ = null
+
+                                val sliced = DepthSlicingEngine.sliceForegroundCutout(
+                                    sourceBmp = src,
+                                    normalizedDepth = depth,
+                                    depthWidth = dW,
+                                    depthHeight = dH,
+                                    clockZDepth = targetZ
                                 )
+                                withContext(Dispatchers.Main) {
+                                    _uiState.value = _uiState.value.copy(
+                                        cutoutBitmap = sliced,
+                                        currentProject = _uiState.value.currentProject.copy(clockZDepth = targetZ)
+                                    )
+                                }
                             }
+                        } catch (t: Throwable) {
+                            AppLogger.e("StudioViewModel", "sliceJob error", t)
+                        } finally {
+                            isSlicing = false
                         }
-                    } catch (t: Throwable) {
-                        AppLogger.e("StudioViewModel", "sliceJob error", t)
                     }
                 }
             }
@@ -685,6 +694,16 @@ class StudioViewModel(
         val p = repository.getProjectById(projectId)
         if (p != null) {
             selectProject(p)
+        }
+
+        val wm = WallpaperManager.getInstance(context)
+        val info = wm.wallpaperInfo
+        val isAlreadyRunning = info != null && info.serviceName == ParallaxWallpaperService::class.java.name
+        if (isAlreadyRunning) {
+            // Wallpaper service is already active on the device!
+            // The broadcast sent by repository.setActiveProject has already updated it live.
+            _uiState.value = _uiState.value.copy(statusMessage = "Wallpaper updated live!")
+            return
         }
 
         // Launch system wallpaper picker pointing to ParallaxWallpaperService

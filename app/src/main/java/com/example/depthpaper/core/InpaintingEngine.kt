@@ -57,7 +57,7 @@ object InpaintingEngine {
         maskWidth: Int,
         maskHeight: Int,
         threshold: Float = 0.5f,
-        dilationRadius: Int = 8
+        dilationRadius: Int = 2
     ): Bitmap {
         val w = sourceBmp.width
         val h = sourceBmp.height
@@ -66,10 +66,7 @@ object InpaintingEngine {
         val pixels = IntArray(w * h)
         outBmp.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // Use caller-provided threshold directly.
-        // A lower threshold here ensures even low-confidence body parts (legs, feet)
-        // are erased from the background plate, preventing parallax double-vision.
-        val holeThreshold = threshold.coerceIn(0.05f, 0.95f)
+        val holeThreshold = threshold.coerceIn(0.10f, 0.95f)
         val rawHole = BooleanArray(w * h)
         var holePixelCount = 0
 
@@ -94,41 +91,46 @@ object InpaintingEngine {
             return outBmp
         }
 
-        // 2. Fast Separable 2D Box Dilation: expanded up to 32px for group photos
-        val dR = dilationRadius.coerceIn(2, 32)
-        val tempDilated = BooleanArray(w * h)
+        // 2. Fast Separable 2D Box Dilation: tightly capped to 0..4px to prevent outer blurry halos
+        val dR = dilationRadius.coerceIn(0, 4)
         val dilatedHole = BooleanArray(w * h)
 
-        // Horizontal dilation pass
-        for (y in 0 until h) {
-            val row = y * w
-            var activeInWindow = 0
-            val initLimit = min(w, dR)
-            for (x in 0 until initLimit) {
-                if (rawHole[row + x]) activeInWindow++
-            }
-            for (x in 0 until w) {
-                val enter = x + dR
-                if (enter < w && rawHole[row + enter]) activeInWindow++
-                val leave = x - dR - 1
-                if (leave >= 0 && rawHole[row + leave]) activeInWindow--
-                if (activeInWindow > 0) tempDilated[row + x] = true
-            }
-        }
+        if (dR == 0) {
+            System.arraycopy(rawHole, 0, dilatedHole, 0, w * h)
+        } else {
+            val tempDilated = BooleanArray(w * h)
 
-        // Vertical dilation pass
-        for (x in 0 until w) {
-            var activeInWindow = 0
-            val initLimit = min(h, dR)
-            for (y in 0 until initLimit) {
-                if (tempDilated[y * w + x]) activeInWindow++
-            }
+            // Horizontal dilation pass
             for (y in 0 until h) {
-                val enter = y + dR
-                if (enter < h && tempDilated[enter * w + x]) activeInWindow++
-                val leave = y - dR - 1
-                if (leave >= 0 && tempDilated[leave * w + x]) activeInWindow--
-                if (activeInWindow > 0) dilatedHole[y * w + x] = true
+                val row = y * w
+                var activeInWindow = 0
+                val initLimit = min(w, dR)
+                for (x in 0 until initLimit) {
+                    if (rawHole[row + x]) activeInWindow++
+                }
+                for (x in 0 until w) {
+                    val enter = x + dR
+                    if (enter < w && rawHole[row + enter]) activeInWindow++
+                    val leave = x - dR - 1
+                    if (leave >= 0 && rawHole[row + leave]) activeInWindow--
+                    if (activeInWindow > 0) tempDilated[row + x] = true
+                }
+            }
+
+            // Vertical dilation pass
+            for (x in 0 until w) {
+                var activeInWindow = 0
+                val initLimit = min(h, dR)
+                for (y in 0 until initLimit) {
+                    if (tempDilated[y * w + x]) activeInWindow++
+                }
+                for (y in 0 until h) {
+                    val enter = y + dR
+                    if (enter < h && tempDilated[enter * w + x]) activeInWindow++
+                    val leave = y - dR - 1
+                    if (leave >= 0 && tempDilated[leave * w + x]) activeInWindow--
+                    if (activeInWindow > 0) dilatedHole[y * w + x] = true
+                }
             }
         }
 
@@ -292,7 +294,7 @@ object InpaintingEngine {
         val pyramidL0 = levels[0]
 
         // 4. Distance Transform for Continuous Cosine Boundary Feathering
-        val featherDist = 6
+        val featherDist = 2
         val distToValid = IntArray(w * h) { if (dilatedHole[it]) featherDist else 0 }
 
         // Forward scan

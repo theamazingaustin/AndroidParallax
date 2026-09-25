@@ -73,21 +73,22 @@ object OnnxDepthAnythingEngine {
         val env = ortEnvironment ?: return null
         val inName = inputName ?: session.inputNames.iterator().next()
 
-        val srcW = inputBitmap.width
-        val srcH = inputBitmap.height
+        val safeInput = DepthSlicingEngine.ensureSoftwareBitmap(inputBitmap)
+        val srcW = safeInput.width
+        val srcH = safeInput.height
 
         return try {
             // 1. Scale input bitmap to [256, 256]
             val scaledBmp = if (srcW == INPUT_DIM && srcH == INPUT_DIM) {
-                inputBitmap
+                safeInput
             } else {
-                Bitmap.createScaledBitmap(inputBitmap, INPUT_DIM, INPUT_DIM, true)
+                Bitmap.createScaledBitmap(safeInput, INPUT_DIM, INPUT_DIM, true)
             }
 
             // 2. Convert to [1, 256, 256, 3] UINT8 buffer
             val pixels = IntArray(INPUT_DIM * INPUT_DIM)
             scaledBmp.getPixels(pixels, 0, INPUT_DIM, 0, 0, INPUT_DIM, INPUT_DIM)
-            if (scaledBmp !== inputBitmap && !scaledBmp.isRecycled) {
+            if (scaledBmp !== safeInput && !scaledBmp.isRecycled) {
                 scaledBmp.recycle()
             }
 
@@ -102,7 +103,8 @@ object OnnxDepthAnythingEngine {
                 rewind()
             }
 
-            // 3. Create input tensor and run inference
+            // 3. Create input tensor and run inference with leak-proof lifecycle
+            val rawDepthBytes = ByteArray(OUTPUT_DIM * OUTPUT_DIM)
             val inputTensor = OnnxTensor.createTensor(
                 env,
                 imgBuffer,
@@ -110,21 +112,27 @@ object OnnxDepthAnythingEngine {
                 OnnxJavaType.UINT8
             )
 
-            val startTime = System.currentTimeMillis()
-            val outputs = session.run(mapOf(inName to inputTensor))
-            val durationMs = System.currentTimeMillis() - startTime
-            AppLogger.i(TAG, "ONNX inference completed in ${durationMs}ms")
+            try {
+                val startTime = System.currentTimeMillis()
+                val outputs = session.run(mapOf(inName to inputTensor))
+                try {
+                    val durationMs = System.currentTimeMillis() - startTime
+                    AppLogger.i(TAG, "ONNX inference completed in ${durationMs}ms")
 
-            // 4. Read output tensor [1, 252, 252] UINT8
-            val outputTensor = outputs[0] as OnnxTensor
-            val outBuffer = outputTensor.byteBuffer
-            outBuffer.rewind()
-            val rawDepthBytes = ByteArray(OUTPUT_DIM * OUTPUT_DIM)
-            outBuffer.get(rawDepthBytes)
-            inputTensor.close()
-            outputs.close()
+                    // 4. Read output tensor [1, 252, 252] UINT8
+                    val outputTensor = outputs[0] as OnnxTensor
+                    val outBuffer = outputTensor.byteBuffer
+                    outBuffer.rewind()
+                    outBuffer.get(rawDepthBytes)
+                } finally {
+                    outputs.close()
+                }
+            } finally {
+                inputTensor.close()
+            }
 
             // 5. Bilinear upsampling to original photo dimensions (srcW × srcH)
+            // Model outputs 252x252 patches covering input region [2..253] (2px margin on 256 grid)
             val outDepth = FloatArray(srcW * srcH)
             val invSrcW = 1.0f / max(1, srcW - 1)
             val invSrcH = 1.0f / max(1, srcH - 1)
@@ -134,7 +142,7 @@ object OnnxDepthAnythingEngine {
 
             for (y in 0 until srcH) {
                 val v = y * invSrcH
-                val srcY = v * (OUTPUT_DIM - 1)
+                val srcY = (v * (INPUT_DIM - 1) - 2f).coerceIn(0f, (OUTPUT_DIM - 1).toFloat())
                 val y0 = srcY.toInt().coerceIn(0, OUTPUT_DIM - 2)
                 val y1 = y0 + 1
                 val dy = srcY - y0
@@ -145,7 +153,7 @@ object OnnxDepthAnythingEngine {
 
                 for (x in 0 until srcW) {
                     val u = x * invSrcW
-                    val srcX = u * (OUTPUT_DIM - 1)
+                    val srcX = (u * (INPUT_DIM - 1) - 2f).coerceIn(0f, (OUTPUT_DIM - 1).toFloat())
                     val x0 = srcX.toInt().coerceIn(0, OUTPUT_DIM - 2)
                     val x1 = x0 + 1
                     val dx = srcX - x0

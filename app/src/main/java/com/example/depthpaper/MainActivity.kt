@@ -69,9 +69,14 @@ class MainActivity : ComponentActivity() {
                     ) { uri: Uri? ->
                         uri?.let {
                             val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, it)) { decoder, _, _ ->
+                                ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, it)) { decoder, info, _ ->
                                     decoder.isMutableRequired = true
                                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                                    val maxDim = kotlin.math.max(info.size.width, info.size.height)
+                                    if (maxDim > 2560) {
+                                        val sample = (maxDim / 2560).coerceAtLeast(1)
+                                        decoder.setTargetSampleSize(sample)
+                                    }
                                 }
                             } else {
                                 @Suppress("DEPRECATION")

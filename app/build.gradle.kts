@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.depthpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 27
-        versionName = "0.22.1"
+        versionCode = 28
+        versionName = "0.23.0"
     }
 
     signingConfigs {
@@ -86,7 +86,6 @@ dependencies {
   implementation(libs.androidx.compose.material.icons.extended)
 
   // On-Device ML
-  implementation(libs.mediapipe.tasks.vision)
   implementation("org.tensorflow:tensorflow-lite:2.16.1")
   implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
   implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
@@ -106,9 +105,4 @@ dependencies {
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)
   androidTestImplementation(libs.androidx.test.espresso.core)
-
-  // Navigation
-  implementation(libs.androidx.navigation3.ui)
-  implementation(libs.androidx.navigation3.runtime)
-  implementation(libs.androidx.lifecycle.viewmodel.navigation3)
 }

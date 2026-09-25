@@ -1054,14 +1054,10 @@ class SegmentationEngine(private val context: Context) {
         }
 
         // 8. Inpainted Background Plate
-        // CRITICAL: Use a much lower inpainting threshold than the cutout threshold.
-        // Low-confidence pixels (legs, feet in group shots) may be transparent in the foreground
-        // cutout (below cutout threshold) but still need to be ERASED from the background plate.
-        // If they remain in both plates and the plates move in opposite parallax directions →
-        // double-vision ghost artifacts.
-        // inpaintThreshold = ~45% of cutout threshold ensures full body coverage in background.
-        val inpaintThreshold = (threshold * 0.45f).coerceAtLeast(0.10f)
-        val inpaintDilation = inpaintRadius.coerceIn(8, 24)
+        // Inpaint hole strictly matches the foreground cutout threshold to eliminate outer blurry halos.
+        // Dilation is tightly restricted to 1..4px so infilled pixels stay hidden under the cutout at rest.
+        val inpaintThreshold = threshold.coerceIn(0.25f, 0.85f)
+        val inpaintDilation = inpaintRadius.coerceIn(1, 4)
         val inpaintedBmp = InpaintingEngine.inpaintBackground(
             sourceBmp = safeBmp,
             mask = solidMask,
@@ -1457,10 +1453,51 @@ class SegmentationEngine(private val context: Context) {
         depthResult: DepthAnythingEngine.DepthResult?,
         bitmap: Bitmap
     ): Triple<FloatArray, Int, Int> {
-        if (depthResult != null) {
+        if (depthResult == null) return computeUniversalSaliencyMask(bitmap)
+
+        val multiclass = try { multiclassSegmenter.segment(bitmap) } catch (_: Exception) { null }
+        if (multiclass == null) {
             return Triple(depthResult.foregroundConfidenceMask, depthResult.depthWidth, depthResult.depthHeight)
         }
-        return computeUniversalSaliencyMask(bitmap)
+
+        val mMask = multiclass.first
+        val mW = multiclass.second
+        val mH = multiclass.third
+        val dMask = depthResult.foregroundConfidenceMask
+        val dW = depthResult.depthWidth
+        val dH = depthResult.depthHeight
+
+        // Check if persons are present
+        var personPixels = 0
+        val mTotal = mW * mH
+        for (i in 0 until mTotal) {
+            if (mMask[i] > 0.35f) personPixels++
+        }
+        val personRatio = personPixels.toFloat() / mTotal
+
+        if (personRatio < 0.03f) {
+            // No persons in scene (e.g. landscape, objects) -> use pure depth geometry
+            return Triple(dMask, dW, dH)
+        }
+
+        // Persons present in scene: protect human bodies, hair, skin, and clothing
+        // so Depth Anything V2 depth variation doesn't slice swiss-cheese holes into people!
+        val fused = FloatArray(dW * dH)
+        val invW = 1.0f / max(1, dW - 1)
+        val invH = 1.0f / max(1, dH - 1)
+
+        for (y in 0 until dH) {
+            val v = y * invH
+            val row = y * dW
+            for (x in 0 until dW) {
+                val u = x * invW
+                val personProb = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
+                val sceneDepthVal = dMask[row + x]
+                // Person is anchored solidly in foreground
+                fused[row + x] = max(sceneDepthVal, personProb).coerceIn(0f, 1f)
+            }
+        }
+        return Triple(fused, dW, dH)
     }
 
     /**

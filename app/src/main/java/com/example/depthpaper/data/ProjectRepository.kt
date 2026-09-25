@@ -65,6 +65,16 @@ class ProjectRepository(private val context: Context) {
 
     fun setActiveProject(id: String) {
         activeProjectFile.writeText(id)
+        notifyWallpaperUpdated()
+    }
+
+    fun notifyWallpaperUpdated() {
+        try {
+            val intent = android.content.Intent("com.example.depthpaper.ACTION_WALLPAPER_UPDATED").apply {
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(intent)
+        } catch (_: Exception) {}
     }
 
     fun toggleFavorite(id: String): WallpaperProject? {
@@ -145,6 +155,9 @@ class ProjectRepository(private val context: Context) {
         if (!dir.exists()) dir.mkdirs()
         val f = File(dir, "cutout.png")
         saveBitmap(cutoutBmp, f)
+        if (getActiveProjectId() == projectId) {
+            notifyWallpaperUpdated()
+        }
         return f.absolutePath
     }
 
@@ -159,6 +172,9 @@ class ProjectRepository(private val context: Context) {
         if (dir.exists()) {
             val metaFile = File(dir, "project.json")
             metaFile.writeText(project.toJson().toString())
+            if (getActiveProjectId() == project.id) {
+                notifyWallpaperUpdated()
+            }
         }
     }
 
