@@ -90,7 +90,6 @@ import com.example.depthpaper.BuildConfig
 import com.example.depthpaper.core.AppUpdater
 import com.example.depthpaper.core.UpdateCheckResult
 import com.example.depthpaper.core.UpdateInfo
-import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

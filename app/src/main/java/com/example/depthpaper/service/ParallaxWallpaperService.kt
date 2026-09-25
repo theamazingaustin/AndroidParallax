@@ -24,7 +24,6 @@ import com.example.depthpaper.core.AppLogger
 import com.example.depthpaper.core.ParallaxMath
 import com.example.depthpaper.core.SensorFilter
 import com.example.depthpaper.data.ProjectRepository
-import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import java.text.SimpleDateFormat
 import java.util.Date

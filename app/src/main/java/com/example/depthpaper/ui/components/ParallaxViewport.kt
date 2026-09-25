@@ -38,7 +38,6 @@ import androidx.compose.ui.unit.IntSize
 import com.example.depthpaper.core.ParallaxMath
 import com.example.depthpaper.core.SensorFilter
 import com.example.depthpaper.data.ClockFontStyle
-import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.data.WallpaperProject
 import com.example.depthpaper.ui.PreviewSurface
 import java.text.SimpleDateFormat
@@ -471,13 +470,11 @@ fun ParallaxViewport(
 
             // 3. Draw Foreground Cutout Plate (drawn when clock is in midground)
             if (!isInFrontOfEverything && !isBehindEverything && hasCutout) {
-                cutoutBmp?.let { bmp ->
-                    drawImage(
-                        image = bmp.asImageBitmap(),
-                        dstOffset = IntOffset(fgLeft, fgTop),
-                        dstSize = drawSize
-                    )
-                }
+                drawImage(
+                    image = cutoutBmp.asImageBitmap(),
+                    dstOffset = IntOffset(fgLeft, fgTop),
+                    dstSize = drawSize
+                )
             }
 
             // If clock is in front of everything or no cutout layer exists, draw clock on top

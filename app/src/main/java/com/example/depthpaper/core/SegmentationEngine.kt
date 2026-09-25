@@ -874,56 +874,8 @@ class SegmentationEngine(private val context: Context) {
             modelAsset = DepthAnythingEngine.MODEL_SMALL_ASSET
         )
 
-        // 2. Execute selected AI processing architecture for foreground extraction
-        var (rawMask, maskW, maskH) = when (processingMode) {
-            ProcessingMode.PIPELINE -> {
-                when (pipelineChoice) {
-                    AiPipelineChoice.UNIVERSAL_CASCADE -> {
-                        executeUniversalCascade(inferenceBmp, depthResult, clockZDepth)
-                    }
-                    AiPipelineChoice.MULTI_LAYER_DEPTH -> {
-                        executeMultiLayerDepthPipeline(depthResult, inferenceBmp, depthLayerCount, clockZDepth)
-                    }
-                    AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH -> {
-                        executeSemanticPortraitDepthPipeline(inferenceBmp, depthResult, depthLayerCount, clockZDepth)
-                    }
-                    AiPipelineChoice.PURE_DEPTH_SMALL -> {
-                        executePureDepthMask(depthResult, inferenceBmp)
-                    }
-                    AiPipelineChoice.CONTOUR_FOCUS_DEPTH -> {
-                        executeContourFocusDepthPipeline(depthResult, inferenceBmp, clockZDepth)
-                    }
-                    AiPipelineChoice.DEPTH_MATTING_FUSION -> {
-                        executeDepthMattingFusionPipeline(inferenceBmp, depthResult, fusionBalance, clockZDepth)
-                    }
-                    AiPipelineChoice.SEMANTIC_PORTRAIT_HYBRID -> {
-                        executeSemanticPortraitHybridPipeline(inferenceBmp)
-                    }
-                    AiPipelineChoice.MULTI_SCALE_ZOOM -> {
-                        executeMultiScaleZoomPipeline(inferenceBmp)
-                    }
-                    AiPipelineChoice.PURE_DEPTH_3D -> {
-                        executePureDepthMask(depthResult, inferenceBmp)
-                    }
-                }
-            }
-            ProcessingMode.SINGLE_MODEL -> {
-                when (modelChoice) {
-                    AiModelChoice.DEPTH_ANYTHING_V2 -> {
-                        executePureDepthMask(depthResult, inferenceBmp)
-                    }
-                    AiModelChoice.SELFIE_MULTICLASS -> {
-                        multiclassSegmenter.segment(inferenceBmp) ?: computeUniversalSaliencyMask(inferenceBmp)
-                    }
-                    AiModelChoice.DEEPLAB_V3 -> {
-                        deepLabSegmenter.segment(inferenceBmp) ?: computeUniversalSaliencyMask(inferenceBmp)
-                    }
-                    AiModelChoice.FAST_SELFIE -> {
-                        fastSelfieSegmenter.segment(inferenceBmp) ?: computeUniversalSaliencyMask(inferenceBmp)
-                    }
-                }
-            }
-        }
+        // 2. Execute Universal AI Cascade for foreground extraction
+        var (rawMask, maskW, maskH) = executeUniversalCascade(inferenceBmp, depthResult, clockZDepth)
 
         // Saliency check
         var fgCount = 0
@@ -1103,9 +1055,8 @@ class SegmentationEngine(private val context: Context) {
         depthResult: DepthAnythingEngine.DepthResult?,
         clockZDepth: Float
     ): Triple<FloatArray, Int, Int> {
+        // 1. Check for human presence (hair, skin, clothes, accessories)
         val multiclass = multiclassSegmenter.segment(bitmap)
-        val deepLab = if (multiclass == null) deepLabSegmenter.segment(bitmap) else null
-
         val mW = multiclass?.second ?: 0
         val mH = multiclass?.third ?: 0
         var personPixels = 0
@@ -1118,9 +1069,11 @@ class SegmentationEngine(private val context: Context) {
         }
         val hasPerson = (mW > 0 && mH > 0 && (personPixels.toFloat() / (mW * mH)) >= 0.03f)
 
-        var objPixels = 0
+        // 2. If no humans detected, check DeepLab for pets (dogs, cats, birds) and objects (vehicles, etc.)
+        val deepLab = if (!hasPerson) deepLabSegmenter.segment(bitmap) else null
         val dW_dl = deepLab?.second ?: 0
         val dH_dl = deepLab?.third ?: 0
+        var objPixels = 0
         if (!hasPerson && deepLab != null && dW_dl > 0 && dH_dl > 0) {
             val mask = deepLab.first
             val total = dW_dl * dH_dl
@@ -1130,420 +1083,36 @@ class SegmentationEngine(private val context: Context) {
         }
         val hasObject = (!hasPerson && dW_dl > 0 && dH_dl > 0 && (objPixels.toFloat() / (dW_dl * dH_dl)) >= 0.03f)
 
-        val outW = depthResult?.depthWidth ?: (if (hasPerson) mW else if (hasObject) dW_dl else 320)
-        val outH = depthResult?.depthHeight ?: (if (hasPerson) mH else if (hasObject) dH_dl else 320)
-        val fused = FloatArray(outW * outH)
-        val invW = 1.0f / max(1, outW - 1)
-        val invH = 1.0f / max(1, outH - 1)
-
-        val depthMask = depthResult?.foregroundConfidenceMask
-        val dW = depthResult?.depthWidth ?: outW
-        val dH = depthResult?.depthHeight ?: outH
-
-        for (y in 0 until outH) {
-            val v = y * invH
-            val row = y * outW
-            for (x in 0 until outW) {
-                val u = x * invW
-
-                val depthVal = if (depthMask != null) {
-                    InpaintingEngine.sampleMaskBilinear(depthMask, dW, dH, u, v)
-                } else 0f
-
-                val subjectVal = when {
-                    hasPerson -> {
-                        val p = InpaintingEngine.sampleMaskBilinear(multiclass!!.first, mW, mH, u, v)
-                        if (clockZDepth < 0.98f) p else 0f
-                    }
-                    hasObject -> {
-                        val o = InpaintingEngine.sampleMaskBilinear(deepLab!!.first, dW_dl, dH_dl, u, v)
-                        if (clockZDepth < 0.98f) o else 0f
-                    }
-                    else -> 0f
+        return when {
+            hasPerson -> {
+                // People detected: return pure semantic person matte (hair, face, skin, clothes).
+                // Zero ground/beach/floor contamination!
+                Triple(multiclass!!.first, mW, mH)
+            }
+            hasObject -> {
+                // Pet or object detected: return pure semantic pet/object matte.
+                Triple(deepLab!!.first, dW_dl, dH_dl)
+            }
+            depthResult != null -> {
+                // Pure Landscape / Architecture / Nature (e.g. palm tree, mountains, buildings):
+                // Depth Anything V2 3D geometry clusters the prominent foreground structure
+                // at the natural depth valley, preserving the entire foreground entity as 100% solid.
+                val dW = depthResult.depthWidth
+                val dH = depthResult.depthHeight
+                val normDepth = depthResult.normalizedDepth
+                val naturalGap = depthResult.naturalDepthGap.coerceIn(0.20f, 0.70f)
+                val total = dW * dH
+                val landscapeFg = FloatArray(total)
+                for (i in 0 until total) {
+                    val d = normDepth[i]
+                    landscapeFg[i] = if (d >= naturalGap) 1.0f else 0.0f
                 }
-
-                fused[row + x] = if (hasPerson || hasObject) {
-                    max(subjectVal, depthVal).coerceIn(0f, 1f)
-                } else {
-                    depthVal
-                }
+                Triple(landscapeFg, dW, dH)
+            }
+            else -> {
+                computeUniversalSaliencyMask(bitmap)
             }
         }
-
-        return Triple(fused, outW, outH)
-    }
-
-    /**
-     * Flagship Pipeline: 3D Multi-Layer Slicing.
-     * Slices continuous 3D depth into K discrete layers with full Z-axis clock placement.
-     * Zero color bias, zero hallucinated boundaries.
-     */
-    private fun executeMultiLayerDepthPipeline(
-        depthResult: DepthAnythingEngine.DepthResult?,
-        bitmap: Bitmap,
-        layerCount: Int,
-        clockZDepth: Float
-    ): Triple<FloatArray, Int, Int> {
-        if (depthResult != null) {
-            return generateQuantizedLayerMask(
-                depth = depthResult.normalizedDepth,
-                dW = depthResult.depthWidth,
-                dH = depthResult.depthHeight,
-                layerCount = layerCount,
-                clockZDepth = clockZDepth
-            )
-        }
-        return computeUniversalSaliencyMask(bitmap)
-    }
-
-    /**
-     * Recommended Hybrid: Semantic Portrait + Multi-Layer Depth.
-     * Uses MediaPipe Selfie Multiclass to lock people solidly into foreground,
-     * while Depth Anything V2 slices all scenery behind them.
-     */
-    private fun executeSemanticPortraitDepthPipeline(
-        bitmap: Bitmap,
-        depthResult: DepthAnythingEngine.DepthResult?,
-        layerCount: Int,
-        clockZDepth: Float
-    ): Triple<FloatArray, Int, Int> {
-        val multiclass = multiclassSegmenter.segment(bitmap)
-        val dW = depthResult?.depthWidth ?: (multiclass?.second ?: 320)
-        val dH = depthResult?.depthHeight ?: (multiclass?.third ?: 320)
-
-        val depthMask = if (depthResult != null) {
-            generateQuantizedLayerMask(
-                depth = depthResult.normalizedDepth,
-                dW = depthResult.depthWidth,
-                dH = depthResult.depthHeight,
-                layerCount = layerCount,
-                clockZDepth = clockZDepth
-            ).first
-        } else {
-            FloatArray(dW * dH) { 0.5f }
-        }
-
-        if (multiclass == null) {
-            return Triple(depthMask, dW, dH)
-        }
-
-        val mMask = multiclass.first
-        val mW = multiclass.second
-        val mH = multiclass.third
-        val fused = FloatArray(dW * dH)
-        val invW = 1.0f / max(1, dW - 1)
-        val invH = 1.0f / max(1, dH - 1)
-
-        for (y in 0 until dH) {
-            val v = y * invH
-            val row = y * dW
-            for (x in 0 until dW) {
-                val u = x * invW
-                val personProb = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
-                val sceneDepthVal = depthMask[row + x]
-                val personVal = if (clockZDepth < 0.98f) personProb else 0f
-                fused[row + x] = max(sceneDepthVal, personVal).coerceIn(0f, 1f)
-            }
-        }
-        return Triple(fused, dW, dH)
-    }
-
-    /**
-     * Recommended Architectural & Landscape Contour Focus.
-     * High-contrast edge-guided depth slicing for buildings, vehicles, and horizons.
-     */
-    private fun executeContourFocusDepthPipeline(
-        depthResult: DepthAnythingEngine.DepthResult?,
-        bitmap: Bitmap,
-        clockZDepth: Float
-    ): Triple<FloatArray, Int, Int> {
-        if (depthResult == null) return computeUniversalSaliencyMask(bitmap)
-        val dW = depthResult.depthWidth
-        val dH = depthResult.depthHeight
-        val depth = depthResult.normalizedDepth
-        val out = FloatArray(dW * dH)
-        val zCut = clockZDepth.coerceIn(0.0f, 1.0f)
-
-        if (zCut <= 0.001f) {
-            out.fill(1.0f)
-            return Triple(out, dW, dH)
-        }
-        if (zCut >= 0.999f) {
-            out.fill(0.0f)
-            return Triple(out, dW, dH)
-        }
-
-        for (y in 0 until dH) {
-            val row = y * dW
-            for (x in 0 until dW) {
-                val idx = row + x
-                val z = depth[idx]
-                val gx = if (x in 1 until dW - 1) depth[idx + 1] - depth[idx - 1] else 0f
-                val gy = if (y in 1 until dH - 1) depth[idx + dW] - depth[idx - dW] else 0f
-                val grad = Math.hypot(gx.toDouble(), gy.toDouble()).toFloat()
-
-                val halfBand = max(0.01f, 0.05f * (1.0f - grad * 2.0f).coerceIn(0.2f, 1.0f))
-                val conf = when {
-                    z >= zCut + halfBand -> 1.0f
-                    z <= zCut - halfBand -> 0.0f
-                    else -> ((z - (zCut - halfBand)) / (2f * halfBand)).coerceIn(0f, 1f)
-                }
-                out[idx] = conf
-            }
-        }
-        return Triple(out, dW, dH)
-    }
-
-    /**
-     * Generates foreground cutout directly from cached depth tensor in < 5ms.
-     * Enables 60 FPS real-time responsiveness when dragging Depth Layers or Clock Z sliders.
-     */
-    fun generateMultiLayerCutout(
-        sourceBmp: Bitmap,
-        normalizedDepth: FloatArray,
-        depthW: Int,
-        depthH: Int,
-        layerCount: Int,
-        clockZDepth: Float,
-        edgeFeathering: Int = 6,
-        enableHoleFilling: Boolean = true,
-        semanticMask: FloatArray? = null,
-        semanticW: Int = 0,
-        semanticH: Int = 0
-    ): Bitmap {
-        val w = sourceBmp.width
-        val h = sourceBmp.height
-        val K = layerCount.coerceIn(2, 20)
-
-        val (layerMask, lW, lH) = generateQuantizedLayerMask(
-            depth = normalizedDepth,
-            dW = depthW,
-            dH = depthH,
-            layerCount = K,
-            clockZDepth = clockZDepth
-        )
-
-        val fusedMask = if (semanticMask != null && semanticW > 0 && semanticH > 0) {
-            val f = FloatArray(lW * lH)
-            val invLW = 1.0f / max(1, lW - 1)
-            val invLH = 1.0f / max(1, lH - 1)
-            for (y in 0 until lH) {
-                val v = y * invLH
-                val row = y * lW
-                for (x in 0 until lW) {
-                    val u = x * invLW
-                    val sVal = InpaintingEngine.sampleMaskBilinear(semanticMask, semanticW, semanticH, u, v)
-                    val dVal = layerMask[row + x]
-                    f[row + x] = if (sVal > 0.45f && clockZDepth < 0.98f) max(dVal, sVal) else dVal
-                }
-            }
-            f
-        } else {
-            layerMask
-        }
-
-        val solidMask = if (enableHoleFilling) {
-            fillMaskHoles(fusedMask, lW, lH, 0.40f)
-        } else {
-            fusedMask
-        }
-
-        val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val sourcePixels = IntArray(w * h)
-        val cutoutPixels = IntArray(w * h)
-        sourceBmp.getPixels(sourcePixels, 0, w, 0, 0, w, h)
-
-        val invW = 1.0f / max(1, w - 1)
-        val invH = 1.0f / max(1, h - 1)
-
-        for (y in 0 until h) {
-            val v = y * invH
-            val rowOffset = y * w
-            for (x in 0 until w) {
-                val u = x * invW
-                val conf = InpaintingEngine.sampleMaskBilinear(solidMask, lW, lH, u, v)
-                val alpha = (conf * 255f).toInt().coerceIn(0, 255)
-                val rgb = sourcePixels[rowOffset + x] and 0x00FFFFFF
-                cutoutPixels[rowOffset + x] = (alpha shl 24) or rgb
-            }
-        }
-        cutoutBmp.setPixels(cutoutPixels, 0, w, 0, 0, w, h)
-        return cutoutBmp
-    }
-
-    /**
-     * Flagship Pipeline: Semantic Anchor (DeepLab + Multiclass) + Depth Anything V2 3D Gating.
-     * Uses DeepLab & Multiclass to guarantee 100% anatomical protection of people/pets (zero head/chest slicing),
-     * while Depth Anything V2 enforces 3D distance separation from background clutter.
-     */
-    private fun executeDepthMattingFusionPipeline(
-        bitmap: Bitmap,
-        depthResult: DepthAnythingEngine.DepthResult?,
-        fusionBalance: Float = 0.50f,
-        clockZDepth: Float = 0.50f
-    ): Triple<FloatArray, Int, Int> {
-        val multiclass = multiclassSegmenter.segment(bitmap) ?: computeUniversalSaliencyMask(bitmap)
-        val deepLab = deepLabSegmenter.segment(bitmap) ?: computeUniversalSaliencyMask(bitmap)
-
-        val outW = max(multiclass.second, deepLab.second)
-        val outH = max(multiclass.third, deepLab.third)
-        val fused = FloatArray(outW * outH)
-        val invW = 1.0f / max(1, outW - 1)
-        val invH = 1.0f / max(1, outH - 1)
-
-        val mMask = multiclass.first
-        val mW = multiclass.second
-        val mH = multiclass.third
-
-        val dLabMask = deepLab.first
-        val dLabW = deepLab.second
-        val dLabH = deepLab.third
-
-        val depthMask = depthResult?.foregroundConfidenceMask
-        val dW = depthResult?.depthWidth ?: outW
-        val dH = depthResult?.depthHeight ?: outH
-
-        for (y in 0 until outH) {
-            val v = y * invH
-            val rowOffset = y * outW
-            for (x in 0 until outW) {
-                val u = x * invW
-                val mVal = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
-                val dLabVal = InpaintingEngine.sampleMaskBilinear(dLabMask, dLabW, dLabH, u, v)
-                // Semantic subject anchor (person, pet, car)
-                val semanticSubject = max(mVal, dLabVal)
-
-                val depthVal = if (depthMask != null) {
-                    InpaintingEngine.sampleMaskBilinear(depthMask, dW, dH, u, v)
-                } else {
-                    semanticSubject
-                }
-
-                // Balance between 3D continuous depth and semantic portrait matting
-                val depthWeight = 2.0f * (1.0f - fusionBalance).coerceIn(0.1f, 1.0f)
-                val semanticWeight = 2.0f * fusionBalance.coerceIn(0.1f, 1.0f)
-
-                val score = max(semanticSubject * semanticWeight, depthVal * depthWeight)
-                fused[rowOffset + x] = score.coerceIn(0f, 1f)
-            }
-        }
-        return Triple(fused, outW, outH)
-    }
-
-    /**
-     * Semantic + Portrait Hybrid:
-     * Fuses DeepLabV3 (group context, bodies, legs, objects) with Selfie Multiclass (hair, clothing details).
-     */
-    private fun executeSemanticPortraitHybridPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        val deepLab = deepLabSegmenter.segment(bitmap) ?: computeUniversalSaliencyMask(bitmap)
-        val multiclass = multiclassSegmenter.segment(bitmap) ?: computeUniversalSaliencyMask(bitmap)
-
-        val outW = max(deepLab.second, multiclass.second)
-        val outH = max(deepLab.third, multiclass.third)
-        val fused = FloatArray(outW * outH)
-        val invW = 1.0f / max(1, outW - 1)
-        val invH = 1.0f / max(1, outH - 1)
-
-        val dMask = deepLab.first
-        val dW = deepLab.second
-        val dH = deepLab.third
-
-        val mMask = multiclass.first
-        val mW = multiclass.second
-        val mH = multiclass.third
-
-        for (y in 0 until outH) {
-            val v = y * invH
-            val rowOffset = y * outW
-            for (x in 0 until outW) {
-                val u = x * invW
-                val dVal = InpaintingEngine.sampleMaskBilinear(dMask, dW, dH, u, v)
-                val mVal = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
-                fused[rowOffset + x] = max(dVal, mVal)
-            }
-        }
-        return Triple(fused, outW, outH)
-    }
-
-    /**
-     * Multi-Scale Zoom Tiling Pipeline:
-     * Global context pass + high-resolution zoomed crops on subject boundaries for sub-pixel precision.
-     */
-    private fun executeMultiScaleZoomPipeline(bitmap: Bitmap): Triple<FloatArray, Int, Int> {
-        val global = deepLabSegmenter.segment(bitmap) ?: computeUniversalSaliencyMask(bitmap)
-        val gMask = global.first
-        val gW = global.second
-        val gH = global.third
-
-        var minX = gW
-        var maxX = 0
-        var minY = gH
-        var maxY = 0
-        var fgCount = 0
-
-        for (y in 0 until gH) {
-            val row = y * gW
-            for (x in 0 until gW) {
-                if (gMask[row + x] > 0.35f) {
-                    fgCount++
-                    if (x < minX) minX = x
-                    if (x > maxX) maxX = x
-                    if (y < minY) minY = y
-                    if (y > maxY) maxY = y
-                }
-            }
-        }
-
-        if (fgCount < 100 || minX >= maxX || minY >= maxY) {
-            return global
-        }
-
-        val normLeft = (minX.toFloat() / gW).coerceIn(0f, 1f)
-        val normTop = (minY.toFloat() / gH).coerceIn(0f, 1f)
-        val normRight = (maxX.toFloat() / gW).coerceIn(0f, 1f)
-        val normBottom = (maxY.toFloat() / gH).coerceIn(0f, 1f)
-
-        val cropLeft = (normLeft * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
-        val cropTop = (normTop * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
-        val cropW = ((normRight - normLeft) * bitmap.width).toInt().coerceIn(32, bitmap.width - cropLeft)
-        val cropH = ((normBottom - normTop) * bitmap.height).toInt().coerceIn(32, bitmap.height - cropTop)
-
-        val cropBmp = try {
-            Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropW, cropH)
-        } catch (_: Exception) {
-            null
-        }
-
-        if (cropBmp == null) return global
-
-        val localCropResult = deepLabSegmenter.segment(cropBmp) ?: computeUniversalSaliencyMask(cropBmp)
-        if (cropBmp != bitmap && !cropBmp.isRecycled) cropBmp.recycle()
-
-        val stitched = gMask.copyOf()
-        val cMask = localCropResult.first
-        val cW = localCropResult.second
-        val cH = localCropResult.third
-
-        for (y in minY..maxY) {
-            val vLocal = (y - minY).toFloat() / max(1, maxY - minY)
-            val rowOffset = y * gW
-            for (x in minX..maxX) {
-                val uLocal = (x - minX).toFloat() / max(1, maxX - minX)
-                val cropConf = InpaintingEngine.sampleMaskBilinear(cMask, cW, cH, uLocal, vLocal)
-                val origConf = stitched[rowOffset + x]
-                stitched[rowOffset + x] = (origConf * 0.35f + cropConf * 0.65f).coerceIn(0f, 1f)
-            }
-        }
-
-        return Triple(stitched, gW, gH)
-    }
-
-    private fun executePureDepthMask(
-        depthResult: DepthAnythingEngine.DepthResult?,
-        bitmap: Bitmap
-    ): Triple<FloatArray, Int, Int> {
-        if (depthResult == null) return computeUniversalSaliencyMask(bitmap)
-        return Triple(depthResult.foregroundConfidenceMask, depthResult.depthWidth, depthResult.depthHeight)
     }
 
     /**

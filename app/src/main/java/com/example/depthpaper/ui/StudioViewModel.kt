@@ -5,7 +5,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.depthpaper.core.AiModelChoice
@@ -25,8 +24,6 @@ import com.example.depthpaper.service.ParallaxWallpaperService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlin.math.max
-import kotlin.math.min
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,8 +69,6 @@ class StudioViewModel(
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     private var saveJob: Job? = null
-    private var isSlicing = false
-    private var pendingSliceZ: Float? = null
     private var cachedNormalizedDepth: FloatArray? = null
     private var cachedDepthW: Int = 0
     private var cachedDepthH: Int = 0
@@ -154,24 +149,6 @@ class StudioViewModel(
             }
         }
 
-        // When Depth Anything V2 is selected, or if cutout is missing, slice fresh cutout from depth map at clockZDepth!
-        if (src != null && (cut == null || project.selectedModel == AiModelChoice.DEPTH_ANYTHING_V2) && ensureCachedDepth()) {
-            val d = cachedNormalizedDepth
-            val dw = cachedDepthW
-            val dh = cachedDepthH
-            if (d != null && dw > 0 && dh > 0) {
-                val freshCut = DepthSlicingEngine.sliceForegroundCutout(
-                    sourceBmp = src,
-                    normalizedDepth = d,
-                    depthWidth = dw,
-                    depthHeight = dh,
-                    clockZDepth = project.clockZDepth
-                )
-                if (freshCut != null) {
-                    cut = freshCut
-                }
-            }
-        }
 
         _uiState.value = _uiState.value.copy(
             currentProject = project,
@@ -565,54 +542,11 @@ class StudioViewModel(
 
         _uiState.value = _uiState.value.copy(currentProject = updatedMeta)
 
-        val src = _uiState.value.sourceBitmap
-        if (src != null && ensureCachedDepth()) {
-            val depth = cachedNormalizedDepth
-            val dW = cachedDepthW
-            val dH = cachedDepthH
-            if (depth != null && dW > 0 && dH > 0) {
-                pendingSliceZ = newZ
-                if (!isSlicing) {
-                    isSlicing = true
-                    viewModelScope.launch(Dispatchers.Default) {
-                        try {
-                            while (true) {
-                                val targetZ = pendingSliceZ ?: break
-                                pendingSliceZ = null
-
-                                val sliced = DepthSlicingEngine.sliceForegroundCutout(
-                                    sourceBmp = src,
-                                    normalizedDepth = depth,
-                                    depthWidth = dW,
-                                    depthHeight = dH,
-                                    clockZDepth = targetZ
-                                )
-                                withContext(Dispatchers.Main) {
-                                    _uiState.value = _uiState.value.copy(
-                                        cutoutBitmap = sliced,
-                                        currentProject = _uiState.value.currentProject.copy(clockZDepth = targetZ)
-                                    )
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            AppLogger.e("StudioViewModel", "sliceJob error", t)
-                        } finally {
-                            isSlicing = false
-                        }
-                    }
-                }
-            }
-        }
-
         saveJob?.cancel()
         saveJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 delay(350)
                 repository.saveProjectMetaOnly(updatedMeta)
-                val currentCut = _uiState.value.cutoutBitmap
-                if (currentCut != null) {
-                    repository.saveCutoutOnly(updatedMeta.id, currentCut)
-                }
             } catch (t: Throwable) {
                 AppLogger.e("StudioViewModel", "saveJob error", t)
             }

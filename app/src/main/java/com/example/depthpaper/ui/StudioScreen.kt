@@ -100,12 +100,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import com.example.depthpaper.core.AppLogger
-import com.example.depthpaper.core.AiModelChoice
-import com.example.depthpaper.core.AiPipelineChoice
-import com.example.depthpaper.core.ProcessingMode
-import com.example.depthpaper.core.SegmentationModelType
 import com.example.depthpaper.data.ClockFontStyle
-import com.example.depthpaper.data.RenderMode
 import com.example.depthpaper.ui.components.ParallaxViewport
 import java.util.Locale
 
@@ -568,11 +563,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var selectedModel by remember(project.id, project.selectedModel) { mutableStateOf(project.selectedModel) }
     var selectedPipeline by remember(project.id, project.selectedPipeline) { mutableStateOf(project.selectedPipeline) }
 
-    val activeProfile = if (processingMode == ProcessingMode.PIPELINE) {
-        selectedPipeline.tuningProfile
-    } else {
-        selectedModel.tuningProfile
-    }
+
 
     Column(
         modifier = Modifier
@@ -688,8 +679,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 4. Granular AI Tuning Controls with Model-Specific Dynamic Sliders
-        val isDepthModel = (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2)
+        // 4. Granular AI Tuning Controls with Dynamic Sliders
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Depth & Parallax Controls", fontSize = 12.sp, color = Color.Gray)
@@ -770,7 +760,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             } else {
                 Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Force Refresh Layers", color = Color.Black, fontWeight = FontWeight.Bold)
+                Text("Re-run Universal AI Cascade", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         }
     }

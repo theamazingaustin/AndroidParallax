@@ -1,26 +1,14 @@
 package com.example.depthpaper.core
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import kotlin.math.max
-import kotlin.math.min
 
 /**
- * High-performance 3D Depth Slicing Engine with RGB Guided Matting Edge Snapping.
- *
- * Slices an image into foreground and background plates at a precise continuous depth threshold Z:
- * - At Z <= 0.001 (Farthest Depth): Entire photo is in front of the clock -> Clock is 100% covered.
- * - At Z >= 0.999 (Nearest Depth): Clock is in front of entire photo -> Clock is 100% uncovered.
- * - Intermediate Z: Slices photo pixels closer than the clock into the foreground cutout plate.
- *   Uses [GuidedMattingFilter] to snap low-resolution depth boundaries to high-resolution RGB edges,
- *   completely eliminating blurred background bleed (e.g. ocean attached to foreground objects).
- *
- * Fully protected against OOM, hardware-backed bitmaps, bounds overflows, and thread flooding.
+ * Depth & Bitmap utility engine for working bitmaps and grayscale depth representations.
  */
 object DepthSlicingEngine {
 
     private const val TAG = "DepthSlicingEngine"
-    private const val DEFAULT_TRANSITION_BAND = 0.035f // +/- 1.75% depth band for edge snapping
     private const val MAX_WORKING_DIMENSION = 1440 // Cap working dimension to 1440px to prevent OOM on phone galleries
 
     /**
@@ -63,185 +51,6 @@ object DepthSlicingEngine {
         }
     }
 
-    /**
-     * Slices [sourceBmp] at [clockZDepth] using [normalizedDepth], snapping boundaries
-     * to high-resolution RGB edges via [GuidedMattingFilter].
-     *
-     * @param sourceBmp The original full-resolution photo plate.
-     * @param normalizedDepth Normalized float depth array (0.0 = furthest, 1.0 = nearest),
-     *                        with dimensions [depthWidth] x [depthHeight].
-     * @param depthWidth Width of depth array.
-     * @param depthHeight Height of depth array.
-     * @param clockZDepth Depth position of the clock in [0.0, 1.0].
-     * @param transitionBand Feathering band width around Z cut for edge matting.
-     * @return ARGB_8888 Bitmap of the foreground subject layer (pixels closer than clock), or null on failure.
-     */
-    fun sliceForegroundCutout(
-        sourceBmp: Bitmap,
-        normalizedDepth: FloatArray,
-        depthWidth: Int,
-        depthHeight: Int,
-        clockZDepth: Float,
-        transitionBand: Float = DEFAULT_TRANSITION_BAND
-    ): Bitmap? {
-        if (sourceBmp.isRecycled) return null
-
-        val safeBmp = ensureSoftwareBitmap(sourceBmp)
-        val w = safeBmp.width
-        val h = safeBmp.height
-
-        val outBmp = try {
-            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        } catch (t: Throwable) {
-            AppLogger.e(TAG, "OOM creating cutout bitmap (${w}x${h})", t)
-            return null
-        }
-
-        // Extreme 1: Clock is in front of all photo elements (100% visible)
-        if (clockZDepth >= 0.999f) {
-            // Cutout is completely transparent
-            return outBmp
-        }
-
-        // Extreme 0: Clock is behind the farthest depth in the scene (100% covered)
-        if (clockZDepth <= 0.001f) {
-            try {
-                val canvas = Canvas(outBmp)
-                canvas.drawBitmap(safeBmp, 0f, 0f, null)
-                return outBmp
-            } catch (t: Throwable) {
-                AppLogger.e(TAG, "Failed to draw opaque copy", t)
-                return null
-            }
-        }
-
-        if (depthWidth <= 1 || depthHeight <= 1 || normalizedDepth.isEmpty()) {
-            return outBmp
-        }
-
-        return try {
-            val totalPixels = w * h
-            val srcPixels = IntArray(totalPixels)
-            safeBmp.getPixels(srcPixels, 0, w, 0, 0, w, h)
-            val outPixels = IntArray(totalPixels)
-
-            val halfBand = transitionBand / 2f
-            val minZ = (clockZDepth - halfBand).coerceAtLeast(0.0f)
-            val maxZ = (clockZDepth + halfBand).coerceAtMost(1.0f)
-            val denom = max(0.0001f, maxZ - minZ)
-
-            // 1. Build depth slice mask on depth grid
-            val depthTotal = depthWidth * depthHeight
-            val depthSliceMask = FloatArray(depthTotal)
-            for (i in 0 until depthTotal) {
-                val d = normalizedDepth[i]
-                depthSliceMask[i] = when {
-                    d >= maxZ -> 1.0f
-                    d <= minZ -> 0.0f
-                    else -> ((d - minZ) / denom).coerceIn(0f, 1f)
-                }
-            }
-
-            // 2. Compute Guided Filter coefficients to transfer sharp RGB boundaries
-            val coeff = try {
-                GuidedMattingFilter.computeCoefficients(
-                    guideBmp = safeBmp,
-                    rawMask = depthSliceMask,
-                    maskWidth = depthWidth,
-                    maskHeight = depthHeight,
-                    radius = 4,
-                    eps = 0.004f
-                )
-            } catch (t: Throwable) {
-                AppLogger.e(TAG, "Guided filter coefficient computation failed; falling back to direct sampling", t)
-                null
-            }
-
-            val maxDepthIdx = depthTotal - 1
-            val scaleX = (depthWidth - 1).toFloat() / max(1, w - 1)
-            val scaleY = (depthHeight - 1).toFloat() / max(1, h - 1)
-            val invW = 1.0f / max(1, w - 1)
-            val invH = 1.0f / max(1, h - 1)
-
-            val solidBgThresh = (minZ - 0.03f).coerceAtLeast(0f)
-            val solidFgThresh = (maxZ + 0.03f).coerceAtMost(1f)
-
-            for (y in 0 until h) {
-                // Cooperative cancellation check every 64 rows
-                if (y and 63 == 0 && Thread.currentThread().isInterrupted) {
-                    outBmp.recycle()
-                    return null
-                }
-
-                val fy = y * scaleY
-                val y0 = fy.toInt().coerceIn(0, max(0, depthHeight - 2))
-                val y1 = min(depthHeight - 1, y0 + 1)
-                val dy = (fy - y0).coerceIn(0f, 1f)
-                val row0 = y0 * depthWidth
-                val row1 = y1 * depthWidth
-                val dstRow = y * w
-                val v = y * invH
-
-                for (x in 0 until w) {
-                    val fx = x * scaleX
-                    val x0 = fx.toInt().coerceIn(0, max(0, depthWidth - 2))
-                    val x1 = min(depthWidth - 1, x0 + 1)
-                    val dx = (fx - x0).coerceIn(0f, 1f)
-
-                    val d00 = normalizedDepth[(row0 + x0).coerceIn(0, maxDepthIdx)]
-                    val d10 = normalizedDepth[(row0 + x1).coerceIn(0, maxDepthIdx)]
-                    val d01 = normalizedDepth[(row1 + x0).coerceIn(0, maxDepthIdx)]
-                    val d11 = normalizedDepth[(row1 + x1).coerceIn(0, maxDepthIdx)]
-
-                    val top = d00 * (1f - dx) + d10 * dx
-                    val bot = d01 * (1f - dx) + d11 * dx
-                    val d = top * (1f - dy) + bot * dy
-
-                    val dstIdx = dstRow + x
-                    val c = srcPixels[dstIdx]
-                    val rgb = c and 0x00FFFFFF
-
-                    when {
-                        d <= solidBgThresh -> {
-                            // Pixel is definitely behind clock -> transparent
-                            outPixels[dstIdx] = 0
-                        }
-                        d >= solidFgThresh -> {
-                            // Pixel is definitely in front of clock -> solid
-                            outPixels[dstIdx] = (255 shl 24) or rgb
-                        }
-                        else -> {
-                            // Boundary transition zone: snap to 1-pixel RGB edge using Guided Matting!
-                            val u = x * invW
-                            val r = (c shr 16 and 0xFF) / 255f
-                            val g = (c shr 8 and 0xFF) / 255f
-                            val b = (c and 0xFF) / 255f
-                            val highResLum = 0.299f * r + 0.587f * g + 0.114f * b
-
-                            val alphaVal = if (coeff != null) {
-                                val guidedAlpha = GuidedMattingFilter.sampleGuidedAlpha(coeff, u, v, highResLum)
-                                val bandNorm = ((d - minZ) / denom).coerceIn(0f, 1f)
-                                // Blend guided edge (70%) with depth band (30%) and apply sigmoid contrast
-                                val edge = (guidedAlpha * 0.70f + bandNorm * 0.30f).coerceIn(0f, 1f)
-                                ((edge - 0.5f) * 2.5f + 0.5f).coerceIn(0f, 1f)
-                            } else {
-                                ((d - minZ) / denom).coerceIn(0f, 1f)
-                            }
-
-                            val alpha = (alphaVal * 255f).toInt().coerceIn(0, 255)
-                            outPixels[dstIdx] = (alpha shl 24) or rgb
-                        }
-                    }
-                }
-            }
-
-            outBmp.setPixels(outPixels, 0, w, 0, 0, w, h)
-            outBmp
-        } catch (t: Throwable) {
-            AppLogger.e(TAG, "Error slicing cutout", t)
-            null
-        }
-    }
 
     /**
      * Converts a float depth array [0.0, 1.0] into an 8-bit grayscale bitmap
