@@ -729,7 +729,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
         }
 
         // 4. Granular AI Tuning Controls with Model-Specific Dynamic Sliders
-        val isDepthModel = (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2 || selectedModel == AiModelChoice.DEPTH_ANYTHING_V2_BASE)
+        val isDepthModel = (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2)
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Depth & Parallax Controls", fontSize = 12.sp, color = Color.Gray)

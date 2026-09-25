@@ -131,17 +131,25 @@ object OnnxDepthAnythingEngine {
                 inputTensor.close()
             }
 
-            // 5. Bilinear upsampling to original photo dimensions (srcW × srcH)
+            // 5. Sample into aspect-correct depth grid with max dimension OUTPUT_DIM (252)
             // Model outputs 252x252 patches covering input region [2..253] (2px margin on 256 grid)
-            val outDepth = FloatArray(srcW * srcH)
-            val invSrcW = 1.0f / max(1, srcW - 1)
-            val invSrcH = 1.0f / max(1, srcH - 1)
+            val maxDim = OUTPUT_DIM
+            val (gridW, gridH) = if (srcW >= srcH) {
+                Pair(maxDim, max(1, (maxDim * srcH.toFloat() / srcW).toInt()))
+            } else {
+                Pair(max(1, (maxDim * srcW.toFloat() / srcH).toInt()), maxDim)
+            }
+
+            val totalGrid = gridW * gridH
+            val outDepth = FloatArray(totalGrid)
+            val invGridW = 1.0f / max(1, gridW - 1)
+            val invGridH = 1.0f / max(1, gridH - 1)
 
             var minD = 255f
             var maxD = 0f
 
-            for (y in 0 until srcH) {
-                val v = y * invSrcH
+            for (y in 0 until gridH) {
+                val v = y * invGridH
                 val srcY = (v * (INPUT_DIM - 1) - 2f).coerceIn(0f, (OUTPUT_DIM - 1).toFloat())
                 val y0 = srcY.toInt().coerceIn(0, OUTPUT_DIM - 2)
                 val y1 = y0 + 1
@@ -149,10 +157,10 @@ object OnnxDepthAnythingEngine {
 
                 val row0 = y0 * OUTPUT_DIM
                 val row1 = y1 * OUTPUT_DIM
-                val dstRow = y * srcW
+                val dstRow = y * gridW
 
-                for (x in 0 until srcW) {
-                    val u = x * invSrcW
+                for (x in 0 until gridW) {
+                    val u = x * invGridW
                     val srcX = (u * (INPUT_DIM - 1) - 2f).coerceIn(0f, (OUTPUT_DIM - 1).toFloat())
                     val x0 = srcX.toInt().coerceIn(0, OUTPUT_DIM - 2)
                     val x1 = x0 + 1
@@ -175,10 +183,10 @@ object OnnxDepthAnythingEngine {
 
             // 6. Normalize depth [0.0, 1.0] where 1.0 = near (foreground), 0.0 = far (sky/background)
             val range = max(0.0001f, maxD - minD)
-            val normalizedDepth = FloatArray(srcW * srcH)
-            val depthPixels = IntArray(srcW * srcH)
+            val normalizedDepth = FloatArray(totalGrid)
+            val depthPixels = IntArray(totalGrid)
 
-            for (i in 0 until srcW * srcH) {
+            for (i in 0 until totalGrid) {
                 val norm = ((outDepth[i] - minD) / range).coerceIn(0f, 1f)
                 normalizedDepth[i] = norm
                 depthPixels[i] = DepthAnythingEngine.turboColormap(norm)
@@ -187,7 +195,7 @@ object OnnxDepthAnythingEngine {
             val naturalGap = DepthAnythingEngine.computeNaturalDepthGap(normalizedDepth)
 
             // 7. Foreground mask from clock Z-depth
-            val fgMask = FloatArray(srcW * srcH)
+            val fgMask = FloatArray(totalGrid)
             val zCut = clockZDepth.coerceIn(0.0f, 1.0f)
             when {
                 zCut <= 0.001f -> fgMask.fill(1.0f)
@@ -195,7 +203,7 @@ object OnnxDepthAnythingEngine {
                 else -> {
                     val halfBand = 0.04f
                     val bandDenom = max(0.0001f, halfBand * 2f)
-                    for (i in 0 until srcW * srcH) {
+                    for (i in 0 until totalGrid) {
                         val d = normalizedDepth[i]
                         fgMask[i] = when {
                             d >= zCut + halfBand -> 1.0f
@@ -206,15 +214,15 @@ object OnnxDepthAnythingEngine {
                 }
             }
 
-            val depthBitmap = Bitmap.createBitmap(srcW, srcH, Bitmap.Config.ARGB_8888)
-            depthBitmap.setPixels(depthPixels, 0, srcW, 0, 0, srcW, srcH)
+            val depthBitmap = Bitmap.createBitmap(gridW, gridH, Bitmap.Config.ARGB_8888)
+            depthBitmap.setPixels(depthPixels, 0, gridW, 0, 0, gridW, gridH)
             lastError = null
 
             DepthAnythingEngine.DepthResult(
                 depthBitmap = depthBitmap,
                 normalizedDepth = normalizedDepth,
-                depthWidth = srcW,
-                depthHeight = srcH,
+                depthWidth = gridW,
+                depthHeight = gridH,
                 foregroundConfidenceMask = fgMask,
                 naturalDepthGap = naturalGap
             )

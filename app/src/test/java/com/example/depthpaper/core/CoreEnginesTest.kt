@@ -133,7 +133,7 @@ class CoreEnginesTest {
         for (model in AiModelChoice.entries) {
             assertTrue("modelName should not be blank", model.modelName.isNotBlank())
             assertTrue("bestAt should not be blank for ${model.name}", model.bestAt.isNotBlank())
-            assertTrue("assetPath should point to models/*.tflite", model.assetPath.startsWith("models/") && model.assetPath.endsWith(".tflite"))
+            assertTrue("assetPath should point to models/*.(tflite|onnx)", model.assetPath.startsWith("models/") && (model.assetPath.endsWith(".tflite") || model.assetPath.endsWith(".onnx")))
         }
         for (pipe in AiPipelineChoice.entries) {
             assertTrue("pipelineName should not be blank", pipe.pipelineName.isNotBlank())
@@ -233,12 +233,12 @@ class CoreEnginesTest {
     }
 
     @Test
-    fun testDepthAnythingV2BaseRegisteredProperly() {
-        val baseModel = AiModelChoice.DEPTH_ANYTHING_V2_BASE
-        assertEquals("models/depth_anything_v2_base.tflite", baseModel.assetPath)
-        assertTrue(baseModel.modelName.contains("Base"))
-        assertTrue(baseModel.bestAt.isNotBlank())
-        assertEquals("Apache 2.0 (100% Commercial Cleared)", baseModel.license)
+    fun testDepthAnythingV2RegisteredProperly() {
+        val model = AiModelChoice.DEPTH_ANYTHING_V2
+        assertEquals("models/depth_anything_v2.onnx", model.assetPath)
+        assertTrue(model.modelName.contains("Depth Anything V2"))
+        assertTrue(model.bestAt.isNotBlank())
+        assertEquals("Apache 2.0 (100% Commercial Cleared)", model.license)
     }
 
     @Test

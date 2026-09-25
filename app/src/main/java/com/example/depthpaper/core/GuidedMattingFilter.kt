@@ -30,10 +30,29 @@ object GuidedMattingFilter {
         radius: Int = 6,
         eps: Float = 0.008f
     ): GuidedCoefficients {
-        val w = maskWidth
-        val h = maskHeight
-        val n = w * h
+        val maxGridDim = 320
+        val maxDim = max(maskWidth, maskHeight)
+        val (w, h, activeMask) = if (maxDim > maxGridDim) {
+            val scale = maxGridDim.toFloat() / maxDim
+            val targetW = (maskWidth * scale).toInt().coerceAtLeast(1)
+            val targetH = (maskHeight * scale).toInt().coerceAtLeast(1)
+            val downsampled = FloatArray(targetW * targetH)
+            val invTW = 1.0f / max(1, targetW - 1)
+            val invTH = 1.0f / max(1, targetH - 1)
+            for (y in 0 until targetH) {
+                val v = y * invTH
+                val row = y * targetW
+                for (x in 0 until targetW) {
+                    val u = x * invTW
+                    downsampled[row + x] = InpaintingEngine.sampleMaskBilinear(rawMask, maskWidth, maskHeight, u, v)
+                }
+            }
+            Triple(targetW, targetH, downsampled)
+        } else {
+            Triple(maskWidth, maskHeight, rawMask)
+        }
 
+        val n = w * h
         val guidePixels = IntArray(n)
         val scaledGuide = if (guideBmp.width != w || guideBmp.height != h) {
             Bitmap.createScaledBitmap(guideBmp, w, h, true)
@@ -55,7 +74,7 @@ object GuidedMattingFilter {
             scaledGuide.recycle()
         }
 
-        return computeCoefficientsFromLuminance(I, rawMask, w, h, radius, eps)
+        return computeCoefficientsFromLuminance(I, activeMask, w, h, radius, eps)
     }
 
     /**

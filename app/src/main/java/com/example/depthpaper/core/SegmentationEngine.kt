@@ -59,26 +59,11 @@ enum class AiModelChoice(
 ) {
     DEPTH_ANYTHING_V2(
         id = "DEPTH_ANYTHING_V2",
-        modelName = "Depth Anything V2 Small (ViT-Small)",
-        shortLabel = "Depth Anything Small",
+        modelName = "Depth Anything V2 (ViT-Small)",
+        shortLabel = "Depth Anything V2",
         bestAt = "Universal continuous 3D metric depth geometry; redwoods, architecture, landscapes, nature, objects, and depth-based multi-subject extraction.",
         license = "Apache 2.0 (100% Commercial Cleared)",
-        assetPath = "models/depth_anything_v2_small.tflite",
-        tuningProfile = ModelTuningProfile(
-            sensitivity = SliderSetting(min = 0.20f, max = 0.85f, default = 0.50f),
-            maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
-            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
-            edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 6f, steps = 15),
-            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
-        )
-    ),
-    DEPTH_ANYTHING_V2_BASE(
-        id = "DEPTH_ANYTHING_V2_BASE",
-        modelName = "Depth Anything V2 Base (ViT-Base, 97.5M)",
-        shortLabel = "Depth Anything Base",
-        bestAt = "High-capacity Vision Transformer; superior depth resolution on distant faces, hands, and intricate scenery.",
-        license = "Apache 2.0 (100% Commercial Cleared)",
-        assetPath = "models/depth_anything_v2_base.tflite",
+        assetPath = "models/depth_anything_v2.onnx",
         tuningProfile = ModelTuningProfile(
             sensitivity = SliderSetting(min = 0.20f, max = 0.85f, default = 0.50f),
             maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
@@ -137,7 +122,7 @@ enum class AiModelChoice(
         fun fromId(id: String): AiModelChoice =
             entries.find { it.id.equals(id, ignoreCase = true) }
                 ?: when (id.uppercase()) {
-                    "DEPTH_ANYTHING_V2_BASE" -> DEPTH_ANYTHING_V2_BASE
+                    "DEPTH_ANYTHING_V2_BASE", "DEPTH_ANYTHING_V2_SMALL" -> DEPTH_ANYTHING_V2
                     "MOD_NET" -> SELFIE_MULTICLASS
                     "BIREF_NET", "MOBILE_SAM" -> DEEPLAB_V3
                     "SELFIE_FAST" -> FAST_SELFIE
@@ -905,7 +890,7 @@ class SegmentationEngine(private val context: Context) {
             }
             ProcessingMode.SINGLE_MODEL -> {
                 when (modelChoice) {
-                    AiModelChoice.DEPTH_ANYTHING_V2, AiModelChoice.DEPTH_ANYTHING_V2_BASE -> {
+                    AiModelChoice.DEPTH_ANYTHING_V2 -> {
                         executePureDepthMask(depthResult, inferenceBmp)
                     }
                     AiModelChoice.SELFIE_MULTICLASS -> {
@@ -1454,50 +1439,7 @@ class SegmentationEngine(private val context: Context) {
         bitmap: Bitmap
     ): Triple<FloatArray, Int, Int> {
         if (depthResult == null) return computeUniversalSaliencyMask(bitmap)
-
-        val multiclass = try { multiclassSegmenter.segment(bitmap) } catch (_: Exception) { null }
-        if (multiclass == null) {
-            return Triple(depthResult.foregroundConfidenceMask, depthResult.depthWidth, depthResult.depthHeight)
-        }
-
-        val mMask = multiclass.first
-        val mW = multiclass.second
-        val mH = multiclass.third
-        val dMask = depthResult.foregroundConfidenceMask
-        val dW = depthResult.depthWidth
-        val dH = depthResult.depthHeight
-
-        // Check if persons are present
-        var personPixels = 0
-        val mTotal = mW * mH
-        for (i in 0 until mTotal) {
-            if (mMask[i] > 0.35f) personPixels++
-        }
-        val personRatio = personPixels.toFloat() / mTotal
-
-        if (personRatio < 0.03f) {
-            // No persons in scene (e.g. landscape, objects) -> use pure depth geometry
-            return Triple(dMask, dW, dH)
-        }
-
-        // Persons present in scene: protect human bodies, hair, skin, and clothing
-        // so Depth Anything V2 depth variation doesn't slice swiss-cheese holes into people!
-        val fused = FloatArray(dW * dH)
-        val invW = 1.0f / max(1, dW - 1)
-        val invH = 1.0f / max(1, dH - 1)
-
-        for (y in 0 until dH) {
-            val v = y * invH
-            val row = y * dW
-            for (x in 0 until dW) {
-                val u = x * invW
-                val personProb = InpaintingEngine.sampleMaskBilinear(mMask, mW, mH, u, v)
-                val sceneDepthVal = dMask[row + x]
-                // Person is anchored solidly in foreground
-                fused[row + x] = max(sceneDepthVal, personProb).coerceIn(0f, 1f)
-            }
-        }
-        return Triple(fused, dW, dH)
+        return Triple(depthResult.foregroundConfidenceMask, depthResult.depthWidth, depthResult.depthHeight)
     }
 
     /**

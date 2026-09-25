@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.depthpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 28
-        versionName = "0.23.0"
+        versionCode = 29
+        versionName = "0.23.1"
     }
 
     signingConfigs {

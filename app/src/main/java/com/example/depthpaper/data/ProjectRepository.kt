@@ -8,7 +8,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 
-class ProjectRepository(private val context: Context) {
+class ProjectRepository(val context: Context) {
 
     private val projectsDir = File(context.filesDir, "projects").apply { if (!exists()) mkdirs() }
     private val activeProjectFile = File(context.filesDir, "active_project.txt")
@@ -158,6 +158,14 @@ class ProjectRepository(private val context: Context) {
         if (getActiveProjectId() == projectId) {
             notifyWallpaperUpdated()
         }
+        return f.absolutePath
+    }
+
+    fun saveRawDepthOnly(projectId: String, rawDepthBmp: Bitmap): String? {
+        val dir = File(projectsDir, projectId)
+        if (!dir.exists()) dir.mkdirs()
+        val f = File(dir, "depth_raw.png")
+        saveBitmap(rawDepthBmp, f)
         return f.absolutePath
     }
 

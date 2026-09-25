@@ -27,7 +27,6 @@ object DepthAnythingEngine {
 
     private const val TAG = "DepthAnythingEngine"
     const val MODEL_SMALL_ASSET = "models/depth_anything_v2_small.tflite"
-    const val MODEL_BASE_ASSET = "models/depth_anything_v2_base.tflite"
 
     // Official input contract from LiteRT / Hugging Face model card
     const val INPUT_WIDTH = 686

@@ -11,7 +11,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.depthpaper.core.AiModelChoice
 import com.example.depthpaper.core.AiPipelineChoice
 import com.example.depthpaper.core.AppLogger
+import com.example.depthpaper.core.DepthAnythingEngine
 import com.example.depthpaper.core.DepthSlicingEngine
+import com.example.depthpaper.core.OnnxDepthAnythingEngine
 import com.example.depthpaper.core.ProcessingMode
 import com.example.depthpaper.core.SegmentationEngine
 import com.example.depthpaper.core.SegmentationModelType
@@ -91,26 +93,24 @@ class StudioViewModel(
                 }
             }
         }
-        val depthBmp = _uiState.value.depthBitmap ?: return false
-        val safeDepthBmp = DepthSlicingEngine.ensureSoftwareBitmap(depthBmp)
-        val w = safeDepthBmp.width
-        val h = safeDepthBmp.height
-        if (w <= 0 || h <= 0) return false
-        return try {
-            val pixels = IntArray(w * h)
-            safeDepthBmp.getPixels(pixels, 0, w, 0, 0, w, h)
-            val depthArr = FloatArray(w * h)
-            for (i in 0 until (w * h)) {
-                depthArr[i] = (Color.red(pixels[i]) / 255.0f).coerceIn(0f, 1f)
+        val src = _uiState.value.sourceBitmap
+        if (src != null) {
+            val depthRes = OnnxDepthAnythingEngine.estimateDepth(repository.context, src)
+                ?: DepthAnythingEngine.estimateDepth(repository.context, src)
+            if (depthRes != null) {
+                cachedNormalizedDepth = depthRes.normalizedDepth
+                cachedDepthW = depthRes.depthWidth
+                cachedDepthH = depthRes.depthHeight
+                if (projId.isNotBlank()) {
+                    val rawDepthBmp = DepthSlicingEngine.createGrayscaleDepthBitmap(depthRes.normalizedDepth, depthRes.depthWidth, depthRes.depthHeight)
+                    if (rawDepthBmp != null) {
+                        repository.saveRawDepthOnly(projId, rawDepthBmp)
+                    }
+                }
+                return true
             }
-            cachedNormalizedDepth = depthArr
-            cachedDepthW = w
-            cachedDepthH = h
-            true
-        } catch (t: Throwable) {
-            AppLogger.e("StudioViewModel", "ensureCachedDepth failed", t)
-            false
         }
+        return false
     }
 
     init {
@@ -154,19 +154,22 @@ class StudioViewModel(
             }
         }
 
-        // If cutout is null and we have depth and source, generate it immediately at clockZDepth!
-        if (cut == null && src != null && ensureCachedDepth()) {
+        // When Depth Anything V2 is selected, or if cutout is missing, slice fresh cutout from depth map at clockZDepth!
+        if (src != null && (cut == null || project.selectedModel == AiModelChoice.DEPTH_ANYTHING_V2) && ensureCachedDepth()) {
             val d = cachedNormalizedDepth
             val dw = cachedDepthW
             val dh = cachedDepthH
             if (d != null && dw > 0 && dh > 0) {
-                cut = DepthSlicingEngine.sliceForegroundCutout(
+                val freshCut = DepthSlicingEngine.sliceForegroundCutout(
                     sourceBmp = src,
                     normalizedDepth = d,
                     depthWidth = dw,
                     depthHeight = dh,
                     clockZDepth = project.clockZDepth
                 )
+                if (freshCut != null) {
+                    cut = freshCut
+                }
             }
         }
 

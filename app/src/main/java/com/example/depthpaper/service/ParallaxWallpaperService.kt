@@ -263,7 +263,9 @@ class ParallaxWallpaperService : WallpaperService() {
             )
 
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && fgBitmap != null
-            val isInFrontOfEverything = project.clockZDepth >= 0.999f
+            val isInFrontOfEverything = project.clockZDepth >= 0.98f || !project.lockScreenConfig.subjectInFrontOfClock
+            val isBehindEverything = project.clockZDepth <= 0.02f
+            val isZeroParallax = project.motionConfig.parallaxIntensity <= 0.001f
 
             val bgShiftX = if (isLayeredMode) tiltX * ParallaxMath.BG_PARALLAX_MULTIPLIER else tiltX * 0.20f
             val bgShiftY = if (isLayeredMode) tiltY * ParallaxMath.BG_PARALLAX_MULTIPLIER else tiltY * 0.20f
@@ -312,11 +314,16 @@ class ParallaxWallpaperService : WallpaperService() {
             }
 
             // 1. Draw Background Layer
-            // When Clock Z is in front of everything, draw the pristine source photo (no inpainting smudge!)
-            val baseBmp = if (isInFrontOfEverything) {
+            // When Clock Z is in front of everything or parallax is disabled, draw the pristine source photo (no inpainting smudge!)
+            val baseBmp = if (isInFrontOfEverything || isZeroParallax) {
                 sourceBitmap ?: bgBitmap
             } else {
                 if (isLayeredMode) (bgBitmap ?: sourceBitmap) else (sourceBitmap ?: bgBitmap)
+            }
+
+            // If clock is behind everything, draw clock behind the base photo plate so it's fully covered
+            if (isBehindEverything && isLayeredMode) {
+                drawClockAction()
             }
 
             baseBmp?.let { bmp ->
@@ -332,13 +339,13 @@ class ParallaxWallpaperService : WallpaperService() {
                 canvas.drawRect(0f, 0f, w, h, dimPaint)
             }
 
-            // Midground clock (drawn behind cutout subject only when not in front of everything)
-            if (!isInFrontOfEverything && isLayeredMode) {
+            // Midground clock (drawn behind cutout subject only when in midground)
+            if (!isInFrontOfEverything && !isBehindEverything && isLayeredMode) {
                 drawClockAction()
             }
 
-            // 3. Foreground Subject Cutout (drawn ONLY in Layered 2D mode when clock is behind subject)
-            if (!isInFrontOfEverything && isLayeredMode) {
+            // 3. Foreground Subject Cutout (drawn ONLY in Layered 2D mode when clock is in midground)
+            if (!isInFrontOfEverything && !isBehindEverything && isLayeredMode) {
                 fgBitmap?.let { bmp ->
                     canvas.drawBitmap(bmp, null, fgDest, null)
                 }

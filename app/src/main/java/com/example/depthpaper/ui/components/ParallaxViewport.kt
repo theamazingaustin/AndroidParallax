@@ -361,7 +361,9 @@ fun ParallaxViewport(
             // Clock is midground (-0.20x to +0.70x)
             // Cutout subject is nearest (+0.70x)
             val isLayeredMode = project.renderMode == RenderMode.LAYERED_2D && cutoutBmp != null
-            val isInFrontOfEverything = project.clockZDepth >= 0.999f
+            val isInFrontOfEverything = project.clockZDepth >= 0.98f || !project.lockScreenConfig.subjectInFrontOfClock
+            val isBehindEverything = project.clockZDepth <= 0.02f
+            val isZeroParallax = project.motionConfig.parallaxIntensity <= 0.001f
 
             val bgShiftX = if (isLayeredMode) shiftX * ParallaxMath.BG_PARALLAX_MULTIPLIER else shiftX * 0.20f
             val bgShiftY = if (isLayeredMode) shiftY * ParallaxMath.BG_PARALLAX_MULTIPLIER else shiftY * 0.20f
@@ -434,11 +436,16 @@ fun ParallaxViewport(
             }
 
             // 1. Draw Background Photo Plate
-            // When Clock Z is in front of everything, draw the PRISTINE source photo (no inpainting smudge!)
-            val bgBmp = if (isInFrontOfEverything) {
+            // When Clock Z is in front of everything or parallax is disabled, draw the PRISTINE source photo (no inpainting smudge!)
+            val bgBmp = if (isInFrontOfEverything || isZeroParallax) {
                 sourceBmp ?: backgroundBmp
             } else {
                 if (isLayeredMode) (backgroundBmp ?: sourceBmp) else (sourceBmp ?: backgroundBmp)
+            }
+
+            // If clock is behind everything, draw clock behind the base photo plate so it's fully covered
+            if (isBehindEverything && isLayeredMode) {
+                drawClock()
             }
 
             bgBmp?.let { bmp ->
@@ -457,13 +464,13 @@ fun ParallaxViewport(
                 )
             }
 
-            // Depth order: Midground Clock is drawn behind subject cutout
-            if (!isInFrontOfEverything && isLayeredMode) {
+            // Depth order: Midground Clock is drawn behind subject cutout only when in midground
+            if (!isInFrontOfEverything && !isBehindEverything && isLayeredMode) {
                 drawClock()
             }
 
-            // 3. Draw Foreground Cutout Plate (drawn ONLY in Layered 2D mode when clock is behind subject)
-            if (!isInFrontOfEverything && isLayeredMode) {
+            // 3. Draw Foreground Cutout Plate (drawn ONLY in Layered 2D mode when clock is in midground)
+            if (!isInFrontOfEverything && !isBehindEverything && isLayeredMode) {
                 cutoutBmp.let { bmp ->
                     drawImage(
                         image = bmp.asImageBitmap(),
@@ -473,7 +480,7 @@ fun ParallaxViewport(
                 }
             }
 
-            // If clock is in front of everything, draw clock on top
+            // If clock is in front of everything or not in layered mode, draw clock on top
             if (isInFrontOfEverything || !isLayeredMode) {
                 drawClock()
             }
