@@ -66,6 +66,15 @@ esac
 
 CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
+# Auto-discover Android Studio JBR / Java if JAVA_HOME is not set
+if [ -z "$JAVA_HOME" ] ; then
+    if [ -x "/c/Program Files/Android/Android Studio/jbr/bin/java" ] ; then
+        JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+    elif [ -x "C:/Program Files/Android/Android Studio/jbr/bin/java.exe" ] ; then
+        JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
+    fi
+fi
+
 # Determine the Java command to use to start the JVM.
 if [ -n "$JAVA_HOME" ] ; then
     if [ -x "$JAVA_HOME/jre/sh/java" ] ; then

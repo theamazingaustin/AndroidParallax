@@ -16,6 +16,15 @@ set APP_HOME=%DIRNAME%
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
 set DEFAULT_JVM_OPTS=
 
+@rem Auto-discover Android Studio JBR / Java if JAVA_HOME is not defined
+if not defined JAVA_HOME (
+    if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" (
+        set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
+    ) else if exist "%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe" (
+        set "JAVA_HOME=%LOCALAPPDATA%\Programs\Android Studio\jbr"
+    )
+)
+
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
 
