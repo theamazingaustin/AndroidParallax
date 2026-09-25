@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.depthpaper.core.AiModelChoice
@@ -120,6 +121,7 @@ class StudioViewModel(
             val newProject = WallpaperProject(
                 title = title,
                 renderMode = detectedMode,
+                clockZDepth = result.naturalDepthGap,
                 isActive = true
             )
 
@@ -166,7 +168,16 @@ class StudioViewModel(
                 threshold = cur.threshold,
                 edgeFeathering = cur.edgeFeathering,
                 maskExpansion = cur.maskExpansion,
-                inpaintRadius = cur.inpaintRadius
+                inpaintRadius = cur.inpaintRadius,
+                cutoutContrast = cur.cutoutContrast,
+                processingMode = cur.processingMode,
+                modelChoice = cur.selectedModel,
+                pipelineChoice = cur.selectedPipeline,
+                clockZDepth = cur.clockZDepth,
+                depthPlaneOffset = cur.depthPlaneOffset,
+                fusionBalance = cur.fusionBalance,
+                enableHoleFilling = cur.enableHoleFilling,
+                holeFillingRadius = cur.holeFillingRadius
             )
 
             val detectedMode = if (result.isPortraitDetected) RenderMode.LAYERED_2D else RenderMode.SPATIAL_3D
@@ -320,9 +331,11 @@ class StudioViewModel(
         cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
         processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
         pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
-        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing,
+        clockZDepth: Float = _uiState.value.currentProject.clockZDepth,
         depthPlaneOffset: Float = _uiState.value.currentProject.depthPlaneOffset,
         fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
+        enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
+        holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius,
         debounceMs: Long = 250L
     ) {
         val src = _uiState.value.sourceBitmap ?: return
@@ -335,11 +348,13 @@ class StudioViewModel(
             inpaintRadius = inpaintRadius,
             cutoutContrast = cutoutContrast,
             depthPlaneOffset = depthPlaneOffset,
+            clockZDepth = clockZDepth,
             fusionBalance = fusionBalance,
+            enableHoleFilling = enableHoleFilling,
+            holeFillingRadius = holeFillingRadius,
             processingMode = processingMode,
             selectedModel = activeModel,
-            selectedPipeline = pipelineChoice,
-            enablePreprocessing = enablePreprocessing
+            selectedPipeline = pipelineChoice
         )
 
         // Instantly update project state for smooth UI reactivity
@@ -369,12 +384,14 @@ class StudioViewModel(
                 maskExpansion = maskExpansion,
                 inpaintRadius = inpaintRadius,
                 cutoutContrast = cutoutContrast,
-                enablePreprocessing = enablePreprocessing,
                 processingMode = processingMode,
                 modelChoice = activeModel,
                 pipelineChoice = pipelineChoice,
+                clockZDepth = clockZDepth,
                 depthPlaneOffset = depthPlaneOffset,
-                fusionBalance = fusionBalance
+                fusionBalance = fusionBalance,
+                enableHoleFilling = enableHoleFilling,
+                holeFillingRadius = holeFillingRadius
             )
 
             val saved = repository.saveProject(
@@ -406,9 +423,11 @@ class StudioViewModel(
         cutoutContrast: Float = _uiState.value.currentProject.cutoutContrast,
         processingMode: ProcessingMode = _uiState.value.currentProject.processingMode,
         pipelineChoice: AiPipelineChoice = _uiState.value.currentProject.selectedPipeline,
-        enablePreprocessing: Boolean = _uiState.value.currentProject.enablePreprocessing,
+        clockZDepth: Float = _uiState.value.currentProject.clockZDepth,
         depthPlaneOffset: Float = _uiState.value.currentProject.depthPlaneOffset,
-        fusionBalance: Float = _uiState.value.currentProject.fusionBalance
+        fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
+        enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
+        holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius
     ) {
         onTuningChanged(
             threshold = threshold,
@@ -419,11 +438,30 @@ class StudioViewModel(
             cutoutContrast = cutoutContrast,
             processingMode = processingMode,
             pipelineChoice = pipelineChoice,
-            enablePreprocessing = enablePreprocessing,
+            clockZDepth = clockZDepth,
             depthPlaneOffset = depthPlaneOffset,
             fusionBalance = fusionBalance,
+            enableHoleFilling = enableHoleFilling,
+            holeFillingRadius = holeFillingRadius,
             debounceMs = 0L
         )
+    }
+
+    fun onClockZDepthChanged(zDepth: Float) {
+        onTuningChanged(clockZDepth = zDepth, debounceMs = 150L)
+    }
+
+    fun onHoleFillingChanged(enabled: Boolean, radius: Int = _uiState.value.currentProject.holeFillingRadius) {
+        onTuningChanged(enableHoleFilling = enabled, holeFillingRadius = radius, debounceMs = 0L)
+    }
+
+    fun onTapPreviewCoordinate(normX: Float, normY: Float) {
+        val depthBmp = _uiState.value.depthBitmap ?: return
+        val px = (normX * (depthBmp.width - 1)).toInt().coerceIn(0, depthBmp.width - 1)
+        val py = (normY * (depthBmp.height - 1)).toInt().coerceIn(0, depthBmp.height - 1)
+        val color = depthBmp.getPixel(px, py)
+        val sampledZ = (Color.red(color) / 255.0f).coerceIn(0.05f, 0.95f)
+        onTuningChanged(clockZDepth = sampledZ, debounceMs = 0L)
     }
 
     fun getCurrentModelType(): AiModelChoice = segmentationEngine.currentModelChoice

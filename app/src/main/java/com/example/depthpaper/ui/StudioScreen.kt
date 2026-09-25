@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewInAr
@@ -263,6 +264,9 @@ fun StudioScreen(
                     onClockPositionChanged = { x, y -> viewModel.updateClockPosition(x, y) },
                     onImageTransformChanged = { scale, panX, panY ->
                         viewModel.updateImageTransform(scale, panX, panY)
+                    },
+                    onTapDepthPoint = { normX, normY ->
+                        viewModel.onTapPreviewCoordinate(normX, normY)
                     },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -546,11 +550,13 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
     var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
     var depthPlaneOffset by remember(project.id, project.depthPlaneOffset) { mutableFloatStateOf(project.depthPlaneOffset) }
+    var clockZDepth by remember(project.id, project.clockZDepth) { mutableFloatStateOf(project.clockZDepth) }
     var fusionBalance by remember(project.id, project.fusionBalance) { mutableFloatStateOf(project.fusionBalance) }
+    var enableHoleFilling by remember(project.id, project.enableHoleFilling) { mutableStateOf(project.enableHoleFilling) }
+    var holeFillingRadius by remember(project.id, project.holeFillingRadius) { mutableIntStateOf(project.holeFillingRadius) }
     var processingMode by remember(project.id, project.processingMode) { mutableStateOf(project.processingMode) }
     var selectedModel by remember(project.id, project.selectedModel) { mutableStateOf(project.selectedModel) }
     var selectedPipeline by remember(project.id, project.selectedPipeline) { mutableStateOf(project.selectedPipeline) }
-    var enablePreprocessing by remember(project.id, project.enablePreprocessing) { mutableStateOf(project.enablePreprocessing) }
 
     val activeProfile = if (processingMode == ProcessingMode.PIPELINE) {
         selectedPipeline.tuningProfile
@@ -616,7 +622,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 2. Pre-Processing Enhancement Option (Works with ANY model or pipeline)
+        // 2. Solid Core (Prevent See-Through) Option
         Card(
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1F38)),
             shape = RoundedCornerShape(12.dp),
@@ -629,14 +635,14 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Tune, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Pre-Process Image (CLAHE & Bilateral)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text("Solid Core (Prevent See-Through)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     }
                     Switch(
-                        checked = enablePreprocessing,
+                        checked = enableHoleFilling,
                         onCheckedChange = {
-                            enablePreprocessing = it
+                            enableHoleFilling = it
                             viewModel.onTuningChanged(
                                 threshold = threshold,
                                 feathering = feathering,
@@ -646,14 +652,18 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                 cutoutContrast = cutoutContrast,
                                 processingMode = processingMode,
                                 pipelineChoice = selectedPipeline,
-                                enablePreprocessing = it,
+                                clockZDepth = clockZDepth,
+                                depthPlaneOffset = depthPlaneOffset,
+                                fusionBalance = fusionBalance,
+                                enableHoleFilling = it,
+                                holeFillingRadius = holeFillingRadius,
                                 debounceMs = 0L
                             )
                         }
                     )
                 }
                 Text(
-                    text = "Applies Contrast-Limited Adaptive Equalization & Bilateral Denoising prior to inference. Anchors subject contrast gradients and removes sensor grain (crucial for grey hoodies on rocks, dark forest paths, or low lighting).",
+                    text = "Morphological flood-fill locks internal face, skin shadow, and clothing cavities to 100% solid opacity. Guarantees the clock never shines through subjects.",
                     fontSize = 11.sp,
                     color = Color.LightGray
                 )
@@ -698,9 +708,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                 cutoutContrast = cutoutContrast,
                                 processingMode = ProcessingMode.SINGLE_MODEL,
                                 pipelineChoice = selectedPipeline,
-                                enablePreprocessing = enablePreprocessing,
+                                clockZDepth = clockZDepth,
                                 depthPlaneOffset = depthPlaneOffset,
                                 fusionBalance = fusionBalance,
+                                enableHoleFilling = enableHoleFilling,
+                                holeFillingRadius = holeFillingRadius,
                                 debounceMs = 0L
                             )
                         }
@@ -794,9 +806,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                                 cutoutContrast = cutoutContrast,
                                 processingMode = ProcessingMode.PIPELINE,
                                 pipelineChoice = pipeline,
-                                enablePreprocessing = enablePreprocessing,
+                                clockZDepth = clockZDepth,
                                 depthPlaneOffset = depthPlaneOffset,
                                 fusionBalance = fusionBalance,
+                                enableHoleFilling = enableHoleFilling,
+                                holeFillingRadius = holeFillingRadius,
                                 debounceMs = 0L
                             )
                         }
@@ -855,12 +869,41 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
         }
 
         // 4. Granular AI Tuning Controls with Model-Specific Dynamic Sliders
-        val isDepthModel = (processingMode == ProcessingMode.SINGLE_MODEL && selectedModel == AiModelChoice.DEPTH_ANYTHING_V2) ||
+        val isDepthModel = (processingMode == ProcessingMode.SINGLE_MODEL && (selectedModel == AiModelChoice.DEPTH_ANYTHING_V2 || selectedModel == AiModelChoice.DEPTH_ANYTHING_V2_BASE)) ||
                            (processingMode == ProcessingMode.PIPELINE && selectedPipeline == AiPipelineChoice.PURE_DEPTH_3D)
         val isFusionPipeline = processingMode == ProcessingMode.PIPELINE && selectedPipeline == AiPipelineChoice.DEPTH_MATTING_FUSION
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Granular AI Tuning (Auto-Reprocesses Live)", fontSize = 12.sp, color = Color.Gray)
+
+            // Clock Z-Depth Slider (with Auto-Gap detection indicator)
+            TuningSliderWithDefaultIndicator(
+                title = "Clock Z-Depth",
+                value = clockZDepth,
+                onValueChange = {
+                    clockZDepth = it
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        inpaintRadius = inpaintRadius,
+                        modelType = selectedModel,
+                        cutoutContrast = cutoutContrast,
+                        processingMode = processingMode,
+                        pipelineChoice = selectedPipeline,
+                        clockZDepth = it,
+                        depthPlaneOffset = depthPlaneOffset,
+                        fusionBalance = fusionBalance,
+                        enableHoleFilling = enableHoleFilling,
+                        holeFillingRadius = holeFillingRadius,
+                        debounceMs = 150L
+                    )
+                },
+                valueRange = 0.05f..0.95f,
+                recommendedValue = project.clockZDepth,
+                displayValue = "${(clockZDepth * 100).toInt()}%",
+                description = "Layers clock forward/backward in 3D scene depth. Tap any subject in the preview above to automatically lock the clock behind it."
+            )
 
             // Sensitivity / Detection Threshold Slider with Recommended Dot
             val sensProf = activeProfile.sensitivity
@@ -878,9 +921,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         cutoutContrast = cutoutContrast,
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
-                        enablePreprocessing = enablePreprocessing,
+                        clockZDepth = clockZDepth,
                         depthPlaneOffset = depthPlaneOffset,
                         fusionBalance = fusionBalance,
+                        enableHoleFilling = enableHoleFilling,
+                        holeFillingRadius = holeFillingRadius,
                         debounceMs = 250L
                     )
                 },
@@ -906,9 +951,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                             cutoutContrast = cutoutContrast,
                             processingMode = processingMode,
                             pipelineChoice = selectedPipeline,
-                            enablePreprocessing = enablePreprocessing,
+                            clockZDepth = clockZDepth,
                             depthPlaneOffset = it,
                             fusionBalance = fusionBalance,
+                            enableHoleFilling = enableHoleFilling,
+                            holeFillingRadius = holeFillingRadius,
                             debounceMs = 250L
                         )
                     },
@@ -935,9 +982,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                             cutoutContrast = cutoutContrast,
                             processingMode = processingMode,
                             pipelineChoice = selectedPipeline,
-                            enablePreprocessing = enablePreprocessing,
+                            clockZDepth = clockZDepth,
                             depthPlaneOffset = depthPlaneOffset,
                             fusionBalance = it,
+                            enableHoleFilling = enableHoleFilling,
+                            holeFillingRadius = holeFillingRadius,
                             debounceMs = 250L
                         )
                     },
@@ -965,9 +1014,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                             cutoutContrast = it,
                             processingMode = processingMode,
                             pipelineChoice = selectedPipeline,
-                            enablePreprocessing = enablePreprocessing,
+                            clockZDepth = clockZDepth,
                             depthPlaneOffset = depthPlaneOffset,
                             fusionBalance = fusionBalance,
+                            enableHoleFilling = enableHoleFilling,
+                            holeFillingRadius = holeFillingRadius,
                             debounceMs = 250L
                         )
                     },
@@ -994,9 +1045,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         cutoutContrast = cutoutContrast,
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
-                        enablePreprocessing = enablePreprocessing,
+                        clockZDepth = clockZDepth,
                         depthPlaneOffset = depthPlaneOffset,
                         fusionBalance = fusionBalance,
+                        enableHoleFilling = enableHoleFilling,
+                        holeFillingRadius = holeFillingRadius,
                         debounceMs = 250L
                     )
                 },
@@ -1023,9 +1076,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         cutoutContrast = cutoutContrast,
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
-                        enablePreprocessing = enablePreprocessing,
+                        clockZDepth = clockZDepth,
                         depthPlaneOffset = depthPlaneOffset,
                         fusionBalance = fusionBalance,
+                        enableHoleFilling = enableHoleFilling,
+                        holeFillingRadius = holeFillingRadius,
                         debounceMs = 250L
                     )
                 },
@@ -1052,9 +1107,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                         cutoutContrast = cutoutContrast,
                         processingMode = processingMode,
                         pipelineChoice = selectedPipeline,
-                        enablePreprocessing = enablePreprocessing,
+                        clockZDepth = clockZDepth,
                         depthPlaneOffset = depthPlaneOffset,
                         fusionBalance = fusionBalance,
+                        enableHoleFilling = enableHoleFilling,
+                        holeFillingRadius = holeFillingRadius,
                         debounceMs = 250L
                     )
                 },
@@ -1097,9 +1154,11 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     cutoutContrast = cutoutContrast,
                     processingMode = processingMode,
                     pipelineChoice = selectedPipeline,
-                    enablePreprocessing = enablePreprocessing,
+                    clockZDepth = clockZDepth,
                     depthPlaneOffset = depthPlaneOffset,
-                    fusionBalance = fusionBalance
+                    fusionBalance = fusionBalance,
+                    enableHoleFilling = enableHoleFilling,
+                    holeFillingRadius = holeFillingRadius
                 )
             },
             enabled = !state.isProcessing && state.sourceBitmap != null,

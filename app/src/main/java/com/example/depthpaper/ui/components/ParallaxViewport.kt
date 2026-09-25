@@ -61,6 +61,7 @@ fun ParallaxViewport(
     onTiltChanged: (Float, Float) -> Unit,
     onClockPositionChanged: (Float, Float) -> Unit,
     onImageTransformChanged: ((Float, Float, Float) -> Unit)? = null,
+    onTapDepthPoint: ((Float, Float) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -148,6 +149,7 @@ fun ParallaxViewport(
             .pointerInput(project.id) {
                 awaitEachGesture {
                     val firstDown = awaitFirstDown(requireUnconsumed = false)
+                    val downPos = firstDown.position
                     val cfg = project.lockScreenConfig
                     val clockTargetX = size.width * currentClockX
                     val clockTargetY = size.height * currentClockY
@@ -159,6 +161,7 @@ fun ParallaxViewport(
                     val isClockTouch = firstDown.position.x in (clockTargetX - hitRadiusX)..(clockTargetX + hitRadiusX) &&
                                        firstDown.position.y in boxTop..boxBottom
                     var isTwoFinger = false
+                    var totalDragDistance = 0f
 
                     do {
                         val event = awaitPointerEvent()
@@ -188,6 +191,7 @@ fun ParallaxViewport(
                         } else if (activePointers.size == 1 && !isTwoFinger) {
                             val change = activePointers[0]
                             val dragAmount = change.position - change.previousPosition
+                            totalDragDistance += dragAmount.getDistance()
 
                             if (isClockTouch) {
                                 isDraggingClock = true
@@ -209,7 +213,28 @@ fun ParallaxViewport(
 
                     if (isDraggingClock) {
                         onClockPositionChanged(currentClockX, currentClockY)
+                    } else if (!isTwoFinger && totalDragDistance < 15f && onTapDepthPoint != null) {
+                        // User tapped on preview to pick 3D depth layer!
+                        // Map touch coordinate on canvas back to original image normalized coordinate
+                        val canvasW = size.width.toFloat()
+                        val canvasH = size.height.toFloat()
+                        val refBmp = sourceBmp ?: backgroundBmp ?: cutoutBmp ?: depthBmp
+                        val imgW = refBmp?.width?.toFloat() ?: canvasW
+                        val imgH = refBmp?.height?.toFloat() ?: canvasH
+                        val overscan = 1.08f
+                        val scale = max((canvasW * overscan) / imgW, (canvasH * overscan) / imgH) * currentScale
+                        val drawW = imgW * scale
+                        val drawH = imgH * scale
+                        val panOffsetX = canvasW * currentPanX
+                        val panOffsetY = canvasH * currentPanY
+                        val baseLeft = (canvasW - drawW) / 2f + panOffsetX
+                        val baseTop = (canvasH - drawH) / 2f + panOffsetY
+
+                        val normX = ((downPos.x - baseLeft) / drawW).coerceIn(0f, 1f)
+                        val normY = ((downPos.y - baseTop) / drawH).coerceIn(0f, 1f)
+                        onTapDepthPoint.invoke(normX, normY)
                     }
+
                     if (isTwoFinger) {
                         onImageTransformChanged?.invoke(currentScale, currentPanX, currentPanY)
                     }

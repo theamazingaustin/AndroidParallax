@@ -189,4 +189,55 @@ class CoreEnginesTest {
             assertTrue("Ground at row $y should have deltaZ <= 0.05f", deltaZ <= 0.05f)
         }
     }
+
+    @Test
+    fun testFillMaskHolesSealsCavityWhilePreservingExteriorBackground() {
+        val w = 7
+        val h = 7
+        val mask = FloatArray(w * h) { 0f }
+
+        // Create a 5x5 ring of foreground (1.0f) from x=1..5, y=1..5
+        for (y in 1..5) {
+            for (x in 1..5) {
+                if (x == 1 || x == 5 || y == 1 || y == 5) {
+                    mask[y * w + x] = 1.0f
+                }
+            }
+        }
+        // Center at (3, 3) is a hollow cavity with 0.0f
+        assertEquals(0f, mask[3 * w + 3], 0.001f)
+        // Border at (0, 0) is true exterior background with 0.0f
+        assertEquals(0f, mask[0 * w + 0], 0.001f)
+
+        // Mock SegmentationEngine's fillMaskHoles logic
+        val filled = SegmentationEngine.fillMaskHoles(mask, w, h, threshold = 0.5f)
+
+        // The center cavity (3, 3) should now be filled to 1.0f
+        assertEquals("Center cavity should be filled to 1.0f", 1.0f, filled[3 * w + 3], 0.001f)
+        // The exterior background at (0, 0) and (0, 3) must remain 0.0f
+        assertEquals("Exterior background should remain 0.0f", 0.0f, filled[0 * w + 0], 0.001f)
+        assertEquals("Exterior background should remain 0.0f", 0.0f, filled[0 * w + 3], 0.001f)
+        // The ring itself should remain 1.0f
+        assertEquals("Ring border should remain 1.0f", 1.0f, filled[1 * w + 1], 0.001f)
+    }
+
+    @Test
+    fun testComputeNaturalDepthGapIdentifiesBimodalValley() {
+        // Create depth array with 50% background at 0.15..0.25 and 50% foreground at 0.75..0.85
+        val depth = FloatArray(100) { i ->
+            if (i < 50) 0.20f else 0.80f
+        }
+        val gap = DepthAnythingEngine.computeNaturalDepthGap(depth)
+        // Gap should be located between foreground and background (e.g. 0.35..0.65)
+        assertTrue("Gap should be between 0.30f and 0.70f, was $gap", gap in 0.30f..0.70f)
+    }
+
+    @Test
+    fun testDepthAnythingV2BaseRegisteredProperly() {
+        val baseModel = AiModelChoice.DEPTH_ANYTHING_V2_BASE
+        assertEquals("models/depth_anything_v2_base.tflite", baseModel.assetPath)
+        assertTrue(baseModel.modelName.contains("Base"))
+        assertTrue(baseModel.bestAt.isNotBlank())
+        assertEquals("Apache 2.0 (100% Commercial Cleared)", baseModel.license)
+    }
 }

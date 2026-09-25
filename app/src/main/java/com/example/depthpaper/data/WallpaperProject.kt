@@ -145,11 +145,13 @@ data class WallpaperProject(
     val imagePanY: Float = 0.0f,
     val cutoutContrast: Float = 0.85f,
     val depthPlaneOffset: Float = 0.50f,
+    val clockZDepth: Float = 0.50f,
     val fusionBalance: Float = 0.50f,
+    val enableHoleFilling: Boolean = true,
+    val holeFillingRadius: Int = 8,
     val processingMode: ProcessingMode = ProcessingMode.PIPELINE,
     val selectedModel: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
     val selectedPipeline: AiPipelineChoice = AiPipelineChoice.DEPTH_MATTING_FUSION,
-    val enablePreprocessing: Boolean = true,
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
@@ -176,11 +178,13 @@ data class WallpaperProject(
         put("imagePanY", imagePanY.toDouble())
         put("cutoutContrast", cutoutContrast.toDouble())
         put("depthPlaneOffset", depthPlaneOffset.toDouble())
+        put("clockZDepth", clockZDepth.toDouble())
         put("fusionBalance", fusionBalance.toDouble())
+        put("enableHoleFilling", enableHoleFilling)
+        put("holeFillingRadius", holeFillingRadius)
         put("processingMode", processingMode.name)
         put("selectedModel", selectedModel.name)
         put("selectedPipeline", selectedPipeline.name)
-        put("enablePreprocessing", enablePreprocessing)
         put("motionConfig", motionConfig.toJson())
         put("lockScreenConfig", lockScreenConfig.toJson())
         put("homeScreenConfig", homeScreenConfig.toJson())
@@ -209,11 +213,13 @@ data class WallpaperProject(
             imagePanY = json.optDouble("imagePanY", 0.0).toFloat(),
             cutoutContrast = json.optDouble("cutoutContrast", 0.85).toFloat(),
             depthPlaneOffset = json.optDouble("depthPlaneOffset", 0.50).toFloat(),
+            clockZDepth = json.optDouble("clockZDepth", json.optDouble("depthPlaneOffset", 0.50)).toFloat(),
             fusionBalance = json.optDouble("fusionBalance", 0.50).toFloat(),
+            enableHoleFilling = json.optBoolean("enableHoleFilling", true),
+            holeFillingRadius = json.optInt("holeFillingRadius", 8),
             processingMode = runCatching { ProcessingMode.valueOf(json.optString("processingMode", "PIPELINE")) }.getOrDefault(ProcessingMode.PIPELINE),
             selectedModel = runCatching { AiModelChoice.fromId(json.optString("selectedModel", "DEPTH_ANYTHING_V2")) }.getOrDefault(AiModelChoice.DEPTH_ANYTHING_V2),
             selectedPipeline = runCatching { AiPipelineChoice.fromId(json.optString("selectedPipeline", "DEPTH_MATTING_FUSION")) }.getOrDefault(AiPipelineChoice.DEPTH_MATTING_FUSION),
-            enablePreprocessing = json.optBoolean("enablePreprocessing", true),
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),
