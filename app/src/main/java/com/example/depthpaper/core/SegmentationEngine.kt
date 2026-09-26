@@ -143,6 +143,21 @@ enum class AiPipelineChoice(
     val isRecommended: Boolean,
     val tuningProfile: ModelTuningProfile
 ) {
+    MLKIT_SUBJECT(
+        id = "MLKIT_SUBJECT",
+        pipelineName = "Google ML Kit Subject Segmentation",
+        shortLabel = "ML Kit Subject (Google)",
+        bestAt = "Google's on-device foundation model for people, pets, and prominent subjects with zero background bleed.",
+        license = "Google Play Services SDK (Commercial Cleared)",
+        isRecommended = true,
+        tuningProfile = ModelTuningProfile(
+            sensitivity = SliderSetting(min = 0.05f, max = 0.95f, default = 0.50f),
+            maskMargin = SliderSetting(min = -10f, max = 10f, default = 0f, steps = 20),
+            layerFlatness = SliderSetting(min = 0.50f, max = 1.0f, default = 0.85f),
+            edgeSoftness = SliderSetting(min = 1f, max = 16f, default = 4f, steps = 15),
+            inpaintFill = SliderSetting(min = 2f, max = 20f, default = 8f, steps = 18)
+        )
+    ),
     UNIVERSAL_CASCADE(
         id = "UNIVERSAL_CASCADE",
         pipelineName = "Universal AI Cascade",
@@ -283,6 +298,7 @@ enum class AiPipelineChoice(
         fun fromId(id: String): AiPipelineChoice =
             entries.find { it.id.equals(id, ignoreCase = true) }
                 ?: when (id.uppercase()) {
+                    "MLKIT_SUBJECT", "ML_KIT", "MLKIT" -> MLKIT_SUBJECT
                     "UNIVERSAL_CASCADE" -> UNIVERSAL_CASCADE
                     "MULTI_LAYER_DEPTH" -> MULTI_LAYER_DEPTH
                     "SEMANTIC_PORTRAIT_DEPTH" -> SEMANTIC_PORTRAIT_DEPTH
@@ -318,7 +334,8 @@ data class SegmentationResult(
     val depthHeight: Int = 0,
     val depthLayerCount: Int = 8,
     val mediaPipeMask: Bitmap? = null,
-    val deepLabMask: Bitmap? = null
+    val deepLabMask: Bitmap? = null,
+    val mlKitMask: Bitmap? = null
 )
 
 /**
@@ -613,6 +630,10 @@ class SegmentationEngine(private val context: Context) {
         )
     }
 
+    private val mlKitSubjectSegmenter by lazy {
+        MlKitSubjectSegmenter(context)
+    }
+
     var currentProcessingMode: ProcessingMode = ProcessingMode.PIPELINE
         private set
     var currentModelChoice: AiModelChoice = AiModelChoice.DEPTH_ANYTHING_V2
@@ -728,6 +749,260 @@ class SegmentationEngine(private val context: Context) {
                 }
             }
             return Triple(fused, outW, outH)
+        }
+
+        /**
+         * 1. Linear Ramp Threshold:
+         * Maps confidence values > threshold linearly to [0..255], while values <= threshold are 0.
+         * Creates smooth, anti-aliased confidence values above cutoff instead of harsh binary steps.
+         */
+        fun applyLinearThresholdRamp(
+            rawMask: FloatArray,
+            width: Int,
+            height: Int,
+            threshold: Float
+        ): ByteArray {
+            val total = width * height
+            val alpha = ByteArray(total)
+            val denom = max(0.001f, 1.0f - threshold)
+            for (i in 0 until total) {
+                val v = rawMask[i]
+                alpha[i] = if (v > threshold) {
+                    (((v - threshold) / denom) * 255f).toInt().coerceIn(0, 255).toByte()
+                } else {
+                    0.toByte()
+                }
+            }
+            return alpha
+        }
+
+        /**
+         * 2. Boundary Expansion / Choke:
+         * Fast separable 1D morphological dilation (+px) or erosion (-px) over alpha channel.
+         */
+        fun expandMaskAlpha(
+            alpha: ByteArray,
+            width: Int,
+            height: Int,
+            expansionPx: Int
+        ): ByteArray {
+            if (expansionPx == 0) return alpha
+            val r = abs(expansionPx).coerceIn(1, 25)
+            val isDilate = expansionPx > 0
+            val temp = ByteArray(width * height)
+            val result = ByteArray(width * height)
+
+            // Pass 1: Horizontal 1D min/max
+            for (y in 0 until height) {
+                val row = y * width
+                for (x in 0 until width) {
+                    var target = if (isDilate) 0 else 255
+                    val xMin = max(0, x - r)
+                    val xMax = min(width - 1, x + r)
+                    for (kx in xMin..xMax) {
+                        val v = alpha[row + kx].toInt() and 0xFF
+                        if (isDilate) {
+                            if (v > target) target = v
+                        } else {
+                            if (v < target) target = v
+                        }
+                    }
+                    temp[row + x] = target.toByte()
+                }
+            }
+
+            // Pass 2: Vertical 1D min/max
+            for (x in 0 until width) {
+                for (y in 0 until height) {
+                    var target = if (isDilate) 0 else 255
+                    val yMin = max(0, y - r)
+                    val yMax = min(height - 1, y + r)
+                    for (ky in yMin..yMax) {
+                        val v = temp[ky * width + x].toInt() and 0xFF
+                        if (isDilate) {
+                            if (v > target) target = v
+                        } else {
+                            if (v < target) target = v
+                        }
+                    }
+                    result[y * width + x] = target.toByte()
+                }
+            }
+            return result
+        }
+
+        /**
+         * 3. Soften Mask (Feathering):
+         * Fast 2-pass separable sliding-window Box Blur over alpha.
+         * Mathematically approximates Gaussian blur for natural, photographic edge transitions.
+         */
+        fun boxBlurAlpha(
+            alpha: ByteArray,
+            width: Int,
+            height: Int,
+            radius: Int
+        ): ByteArray {
+            if (radius <= 0) return alpha
+            val r = radius.coerceIn(1, 32)
+            var current = alpha
+            val temp = ByteArray(width * height)
+            val result = ByteArray(width * height)
+
+            for (pass in 0 until 2) {
+                // Horizontal 1D sliding-window average
+                for (y in 0 until height) {
+                    val row = y * width
+                    var sum = 0
+                    var count = 0
+                    val initXMax = min(width - 1, r)
+                    for (kx in 0..initXMax) {
+                        sum += current[row + kx].toInt() and 0xFF
+                        count++
+                    }
+                    temp[row] = (sum / count).toByte()
+
+                    for (x in 1 until width) {
+                        val addX = x + r
+                        if (addX < width) {
+                            sum += current[row + addX].toInt() and 0xFF
+                            count++
+                        }
+                        val remX = x - r - 1
+                        if (remX >= 0) {
+                            sum -= current[row + remX].toInt() and 0xFF
+                            count--
+                        }
+                        temp[row + x] = if (count > 0) (sum / count).toByte() else 0.toByte()
+                    }
+                }
+
+                // Vertical 1D sliding-window average
+                for (x in 0 until width) {
+                    var sum = 0
+                    var count = 0
+                    val initYMax = min(height - 1, r)
+                    for (ky in 0..initYMax) {
+                        sum += temp[ky * width + x].toInt() and 0xFF
+                        count++
+                    }
+                    result[x] = (sum / count).toByte()
+
+                    for (y in 1 until height) {
+                        val addY = y + r
+                        if (addY < height) {
+                            sum += temp[addY * width + x].toInt() and 0xFF
+                            count++
+                        }
+                        val remY = y - r - 1
+                        if (remY >= 0) {
+                            sum -= temp[remY * width + x].toInt() and 0xFF
+                            count--
+                        }
+                        result[y * width + x] = if (count > 0) (sum / count).toByte() else 0.toByte()
+                    }
+                }
+                current = result
+            }
+            return current
+        }
+
+        /**
+         * 4. Color Decontamination:
+         * Replaces the RGB of boundary edge pixels (alpha in 1..200) with the average color
+         * of nearby core foreground subject pixels (alpha > 200).
+         * Eliminates background sky, beach, or mountain color fringing around hair and edges.
+         */
+        fun decontaminateColors(
+            srcPixels: IntArray,
+            alpha: ByteArray,
+            width: Int,
+            height: Int,
+            radius: Int
+        ): IntArray {
+            val r = max(2, radius).coerceIn(2, 16)
+            val out = srcPixels.clone()
+            for (y in 0 until height) {
+                val row = y * width
+                for (x in 0 until width) {
+                    val idx = row + x
+                    val a = alpha[idx].toInt() and 0xFF
+                    if (a in 1..200) {
+                        var sumR = 0L
+                        var sumG = 0L
+                        var sumB = 0L
+                        var count = 0
+                        val yMin = max(0, y - r)
+                        val yMax = min(height - 1, y + r)
+                        val xMin = max(0, x - r)
+                        val xMax = min(width - 1, x + r)
+                        for (ky in yMin..yMax) {
+                            val kRow = ky * width
+                            for (kx in xMin..xMax) {
+                                val nIdx = kRow + kx
+                                val nAlpha = alpha[nIdx].toInt() and 0xFF
+                                if (nAlpha > 200) {
+                                    val c = srcPixels[nIdx]
+                                    sumR += (c shr 16) and 0xFF
+                                    sumG += (c shr 8) and 0xFF
+                                    sumB += c and 0xFF
+                                    count++
+                                }
+                            }
+                        }
+                        if (count > 0) {
+                            val cr = (sumR / count).toInt().coerceIn(0, 255)
+                            val cg = (sumG / count).toInt().coerceIn(0, 255)
+                            val cb = (sumB / count).toInt().coerceIn(0, 255)
+                            out[idx] = (0xFF shl 24) or (cr shl 16) or (cg shl 8) or cb
+                        }
+                    }
+                }
+            }
+            return out
+        }
+
+        /**
+         * Fast bilinear resampler for refined alpha channel.
+         */
+        fun resampleAlphaBilinear(
+            srcAlpha: ByteArray,
+            srcW: Int,
+            srcH: Int,
+            dstW: Int,
+            dstH: Int
+        ): ByteArray {
+            if (srcW == dstW && srcH == dstH) return srcAlpha
+            val dst = ByteArray(dstW * dstH)
+            val invDstW = 1.0f / max(1, dstW - 1)
+            val invDstH = 1.0f / max(1, dstH - 1)
+            for (y in 0 until dstH) {
+                val srcY = (y * invDstH) * (srcH - 1)
+                val y0 = srcY.toInt().coerceIn(0, srcH - 1)
+                val y1 = (y0 + 1).coerceIn(0, srcH - 1)
+                val fy = srcY - y0
+
+                val rowDst = y * dstW
+                val rowSrc0 = y0 * srcW
+                val rowSrc1 = y1 * srcW
+
+                for (x in 0 until dstW) {
+                    val srcX = (x * invDstW) * (srcW - 1)
+                    val x0 = srcX.toInt().coerceIn(0, srcW - 1)
+                    val x1 = (x0 + 1).coerceIn(0, srcW - 1)
+                    val fx = srcX - x0
+
+                    val v00 = srcAlpha[rowSrc0 + x0].toInt() and 0xFF
+                    val v10 = srcAlpha[rowSrc0 + x1].toInt() and 0xFF
+                    val v01 = srcAlpha[rowSrc1 + x0].toInt() and 0xFF
+                    val v11 = srcAlpha[rowSrc1 + x1].toInt() and 0xFF
+
+                    val top = v00 + (v10 - v00) * fx
+                    val bot = v01 + (v11 - v01) * fx
+                    val interp = top + (bot - top) * fy
+                    dst[rowDst + x] = interp.toInt().coerceIn(0, 255).toByte()
+                }
+            }
+            return dst
         }
 
         /**
@@ -1011,85 +1286,61 @@ class SegmentationEngine(private val context: Context) {
 
         val isPortrait = fgRatio in 0.05f..0.85f
 
-        // 3. True Separable 2D Morphological Mask Expansion/Choke
-        val adjustedMask = if (maskExpansion != 0) {
-            morphologicallyFilterMask(rawMask, maskW, maskH, maskExpansion)
+        // 3. Solid Core Hole-Filling (Guarantees zero transparent holes in faces/chests/bodies)
+        val solidMask = if (enableHoleFilling) {
+            fillMaskHoles(rawMask, maskW, maskH, threshold * 0.75f)
         } else {
             rawMask
         }
 
-        // 4. Solid Core Hole-Filling (Guarantees zero transparent holes in faces/chests/bodies)
-        val solidMask = if (enableHoleFilling) {
-            fillMaskHoles(adjustedMask, maskW, maskH, threshold * 0.75f)
+        // 4. 4-Stage Post-Processing Refinement Pipeline (100% Pure Kotlin):
+        // Stage 1: Linear threshold ramp (maps raw float confidence > threshold to [0..255])
+        val alphaStage1 = applyLinearThresholdRamp(solidMask, maskW, maskH, threshold)
+
+        // Stage 2: Fast separable 1D morphological expansion (+px) or choke/erosion (-px)
+        val alphaStage2 = if (maskExpansion != 0) {
+            expandMaskAlpha(alphaStage1, maskW, maskH, maskExpansion)
         } else {
-            adjustedMask
+            alphaStage1
         }
 
-        // 5. Compute Guided Filter Coefficients for Sub-Pixel Edge Snapping
-        val guidedCoeff = GuidedMattingFilter.computeCoefficients(
-            guideBmp = safeBmp,
-            rawMask = solidMask,
-            maskWidth = maskW,
-            maskHeight = maskH,
-            radius = edgeFeathering.coerceIn(2, 16),
-            eps = 0.005f
-        )
+        // Stage 3: Soften Mask (Feathering) via fast 2-pass separable box blur (Gaussian approximation)
+        val alphaStage3 = if (edgeFeathering > 0) {
+            boxBlurAlpha(alphaStage2, maskW, maskH, edgeFeathering)
+        } else {
+            alphaStage2
+        }
 
-        // 6. Trimap-Constrained Cutout Generation
-        // Core interior is locked to 255 (SOLID: zero hollowing of bodies, clothes, skin)
-        // Exterior is locked to 0 (CLEAN: zero background bleed)
-        // ONLY the thin boundary transition zone is refined by high-res guided filter & Layer Flatness contrast
+        // Resample refined alpha channel to full photo resolution (w x h)
+        val fullAlpha = resampleAlphaBilinear(alphaStage3, maskW, maskH, w, h)
+
+        // Read source pixels for color decontamination and final cutout assembly
         val cutoutBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val sourcePixels = IntArray(w * h)
         val cutoutPixels = IntArray(w * h)
         safeBmp.getPixels(sourcePixels, 0, w, 0, 0, w, h)
 
-        val invW = 1.0f / max(1, w - 1)
-        val invH = 1.0f / max(1, h - 1)
+        // Stage 4: Color Decontamination:
+        // For edge pixels (alpha in 1..200), replaces RGB with average of neighboring core pixels (alpha > 200)
+        // to completely eliminate background halos (sky, sea, sand, cliff) bleeding into foreground edges.
+        val decontaminatedPixels = decontaminateColors(
+            srcPixels = sourcePixels,
+            alpha = fullAlpha,
+            width = w,
+            height = h,
+            radius = edgeFeathering.coerceIn(2, 8)
+        )
 
-        // Transition zone width: ONLY genuine edge pixels get guided feathering.
-        // Interior pixels (confidence >= threshold + transBand) are locked to alpha=255.
-        // Exterior pixels (confidence <= threshold - transBand) are locked to alpha=0.
-        // A wide transBand causes face/body hollowing (dark areas inside silhouette get semi-transparent).
-        // 0.05 = tight 5% band — only the real edge boundary gets feathered.
-        val transBand = 0.05f
-        val solidFgThresh = (threshold + transBand).coerceAtMost(0.95f)
-        val solidBgThresh = (threshold - transBand).coerceAtLeast(0.02f)
-        val bandDenom = max(0.0001f, solidFgThresh - solidBgThresh)
-        val contrastFactor = 1.0f + (cutoutContrast - 0.5f) * 6.0f
-
-        for (y in 0 until h) {
-            val v = y * invH
-            val rowOffset = y * w
-            for (x in 0 until w) {
-                val u = x * invW
-                val c = sourcePixels[rowOffset + x]
-                val neuralConf = InpaintingEngine.sampleMaskBilinear(solidMask, maskW, maskH, u, v)
-
-                val alpha: Int = when {
-                    neuralConf >= solidFgThresh -> 255
-                    neuralConf <= solidBgThresh -> 0
-                    else -> {
-                        val r = (c shr 16 and 0xFF) / 255f
-                        val g = (c shr 8 and 0xFF) / 255f
-                        val b = (c and 0xFF) / 255f
-                        val highResLum = 0.299f * r + 0.587f * g + 0.114f * b
-
-                        val guidedAlpha = GuidedMattingFilter.sampleGuidedAlpha(guidedCoeff, u, v, highResLum)
-                        val bandNorm = ((neuralConf - solidBgThresh) / bandDenom).coerceIn(0f, 1f)
-                        val edgeVal = (guidedAlpha * 0.70f + bandNorm * 0.30f).coerceIn(0f, 1f)
-
-                        val centered = (edgeVal - 0.5f) * contrastFactor + 0.5f
-                        val shapedAlpha = centered.coerceIn(0f, 1f)
-                        (shapedAlpha * 255f).toInt()
-                    }
-                }
-
-                val rgb = c and 0x00FFFFFF
-                cutoutPixels[rowOffset + x] = (alpha shl 24) or rgb
-            }
+        // Assemble final cutout bitmap with decontaminated RGB and refined alpha
+        val totalPix = w * h
+        for (i in 0 until totalPix) {
+            val a = fullAlpha[i].toInt() and 0xFF
+            cutoutPixels[i] = (a shl 24) or (decontaminatedPixels[i] and 0x00FFFFFF)
         }
         cutoutBmp.setPixels(cutoutPixels, 0, w, 0, 0, w, h)
+
+        val invW = 1.0f / max(1, w - 1)
+        val invH = 1.0f / max(1, h - 1)
 
         // 7. Generate Continuous 3D Depth Map with Depth Anything V2
         val depthBmp = if (depthResult != null) {
@@ -1142,7 +1393,8 @@ class SegmentationEngine(private val context: Context) {
             depthHeight = depthResult?.depthHeight ?: maskH,
             depthLayerCount = depthLayerCount,
             mediaPipeMask = cascade.mediaPipeMask,
-            deepLabMask = cascade.deepLabMask
+            deepLabMask = cascade.deepLabMask,
+            mlKitMask = cascade.mlKitMask
         )
     }
 
@@ -1151,25 +1403,44 @@ class SegmentationEngine(private val context: Context) {
         val maskWidth: Int,
         val maskHeight: Int,
         val mediaPipeMask: Bitmap? = null,
-        val deepLabMask: Bitmap? = null
+        val deepLabMask: Bitmap? = null,
+        val mlKitMask: Bitmap? = null
     )
 
     /**
      * Universal AI Cascade (Flagship Pipeline):
      * Seamlessly unifies all scenarios:
-     * 1. Runs Depth Anything V2 for 3D continuous geometry and metric scene depth.
-     * 2. Checks MediaPipe Selfie Multiclass for high-precision portrait details (hair, face, skin, clothes).
-     * 3. Checks DeepLab v3 MobileNet for full bodies, outstretched limbs, background groups, pets, and objects.
-     * 4. Fuses both semantic masks with max-combine to capture close-up faces AND background limbs/people.
-     * 5. If pure landscape/architecture/scene, continuous 3D depth slices foreground at naturalDepthGap.
-     * 6. Solid-core hole-filling and Fast Guided Matting against RGB source luminance snap edges to 1px precision.
+     * 1. Google Play Services ML Kit Subject Segmentation foundation model for high-precision people/pet/subject extraction.
+     * 2. Runs Depth Anything V2 for 3D continuous geometry and metric scene depth.
+     * 3. Checks MediaPipe Selfie Multiclass for high-precision portrait details (hair, face, skin, clothes).
+     * 4. Checks DeepLab v3 MobileNet for full bodies, outstretched limbs, background groups, pets, and objects.
+     * 5. Fuses both semantic masks with max-combine if ML Kit is not ready on-device.
+     * 6. If pure landscape/architecture/scene, continuous 3D depth slices foreground at naturalDepthGap.
+     * 7. Solid-core hole-filling and 4-stage post-processing (linear ramp, expansion, box blur feather, color decontamination).
      */
     private fun executeUniversalCascade(
         bitmap: Bitmap,
         depthResult: DepthAnythingEngine.DepthResult?,
         clockZDepth: Float
     ): CascadeResult {
-        // 1. Run MediaPipe Selfie Multiclass for fine hair/face/portrait details
+        // 0. Primary pass: Google ML Kit Subject Segmentation foundation model
+        val mlKit = mlKitSubjectSegmenter.segment(bitmap)
+        val mlKitW = mlKit?.width ?: 0
+        val mlKitH = mlKit?.height ?: 0
+        val mlKitMask = mlKit?.mask
+        var mlKitPixels = 0
+        if (mlKitMask != null && mlKitW > 0 && mlKitH > 0) {
+            val total = mlKitW * mlKitH
+            for (i in 0 until total) {
+                if (mlKitMask[i] >= 0.35f) mlKitPixels++
+            }
+        }
+        val hasMlKitSubject = (mlKitW > 0 && mlKitH > 0 && (mlKitPixels.toFloat() / (mlKitW * mlKitH)) >= 0.01f)
+        val mlKitMaskBmp = if (mlKitMask != null && mlKitW > 0 && mlKitH > 0) {
+            createGrayscaleMaskBitmap(mlKitMask, mlKitW, mlKitH)
+        } else null
+
+        // 1. Run MediaPipe Selfie Multiclass for fine hair/face/portrait details (and diagnostic preview)
         val multiclass = multiclassSegmenter.segment(bitmap)
         val mW = multiclass?.second ?: 0
         val mH = multiclass?.third ?: 0
@@ -1186,7 +1457,7 @@ class SegmentationEngine(private val context: Context) {
             createGrayscaleMaskBitmap(mMask, mW, mH)
         } else null
 
-        // 2. Run DeepLab v3 MobileNet unconditionally for full-body, outstretched limbs, background groups, pets & objects
+        // 2. Run DeepLab v3 MobileNet for full-body, outstretched limbs, background groups, pets & objects
         val deepLab = deepLabSegmenter.segment(bitmap)
         val dW = deepLab?.second ?: 0
         val dH = deepLab?.third ?: 0
@@ -1203,8 +1474,23 @@ class SegmentationEngine(private val context: Context) {
             createGrayscaleMaskBitmap(dMask, dW, dH)
         } else null
 
-        // 3. Dual-Model Semantic Fusion
+        // Primary: If ML Kit Subject Segmentation succeeded, use it directly!
+        // Highest accuracy on arbitrary subjects with zero background bleed.
+        if (hasMlKitSubject && mlKitMask != null) {
+            AppLogger.i("SegmentationEngine", "UniversalCascade: ML Kit Subject Segmentation active ($mlKitPixels pixels).")
+            return CascadeResult(
+                fusedMask = mlKitMask,
+                maskWidth = mlKitW,
+                maskHeight = mlKitH,
+                mediaPipeMask = mpMaskBmp,
+                deepLabMask = dlMaskBmp,
+                mlKitMask = mlKitMaskBmp
+            )
+        }
+
+        // Fallback 1: Dual-Model Semantic Fusion (MediaPipe + DeepLab)
         if (hasMpPerson || hasDlSubject) {
+            AppLogger.i("SegmentationEngine", "UniversalCascade: Falling back to MediaPipe + DeepLab fusion.")
             val (fused, fW, fH) = fuseSemanticMasks(
                 mMask = if (hasMpPerson) mMask else null,
                 mW = mW,
@@ -1218,12 +1504,14 @@ class SegmentationEngine(private val context: Context) {
                 maskWidth = fW,
                 maskHeight = fH,
                 mediaPipeMask = mpMaskBmp,
-                deepLabMask = dlMaskBmp
+                deepLabMask = dlMaskBmp,
+                mlKitMask = mlKitMaskBmp
             )
         }
 
-        // 4. Pure Landscape / Architecture / Nature fallback: Depth Anything V2
+        // Fallback 2: Pure Landscape / Architecture / Nature fallback: Depth Anything V2
         if (depthResult != null) {
+            AppLogger.i("SegmentationEngine", "UniversalCascade: Falling back to Depth Anything V2 depth slicing.")
             val dW_da = depthResult.depthWidth
             val dH_da = depthResult.depthHeight
             val normDepth = depthResult.normalizedDepth
@@ -1239,18 +1527,20 @@ class SegmentationEngine(private val context: Context) {
                 maskWidth = dW_da,
                 maskHeight = dH_da,
                 mediaPipeMask = mpMaskBmp,
-                deepLabMask = dlMaskBmp
+                deepLabMask = dlMaskBmp,
+                mlKitMask = mlKitMaskBmp
             )
         }
 
-        // 5. Universal Saliency fallback
+        // Fallback 3: Universal Saliency fallback
         val universal = computeUniversalSaliencyMask(bitmap)
         return CascadeResult(
             fusedMask = universal.first,
             maskWidth = universal.second,
             maskHeight = universal.third,
             mediaPipeMask = mpMaskBmp,
-            deepLabMask = dlMaskBmp
+            deepLabMask = dlMaskBmp,
+            mlKitMask = mlKitMaskBmp
         )
     }
 
@@ -1283,6 +1573,7 @@ class SegmentationEngine(private val context: Context) {
     }
 
     fun close() {
+        mlKitSubjectSegmenter.close()
         deepLabSegmenter.close()
         multiclassSegmenter.close()
         fastSelfieSegmenter.close()

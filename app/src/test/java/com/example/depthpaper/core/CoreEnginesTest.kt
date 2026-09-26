@@ -244,7 +244,8 @@ class CoreEnginesTest {
     @Test
     fun testRecommendedPipelinesRegisteredAndClassified() {
         val recommended = AiPipelineChoice.entries.filter { it.isRecommended }
-        assertEquals(5, recommended.size)
+        assertEquals(6, recommended.size)
+        assertTrue(recommended.contains(AiPipelineChoice.MLKIT_SUBJECT))
         assertTrue(recommended.contains(AiPipelineChoice.UNIVERSAL_CASCADE))
         assertTrue(recommended.contains(AiPipelineChoice.MULTI_LAYER_DEPTH))
         assertTrue(recommended.contains(AiPipelineChoice.SEMANTIC_PORTRAIT_DEPTH))
@@ -306,6 +307,8 @@ class CoreEnginesTest {
         assertTrue(cascade.isRecommended)
         assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("anything_unknown"))
         assertEquals(AiPipelineChoice.UNIVERSAL_CASCADE, AiPipelineChoice.fromId("UNIVERSAL_CASCADE"))
+        assertEquals(AiPipelineChoice.MLKIT_SUBJECT, AiPipelineChoice.fromId("MLKIT_SUBJECT"))
+        assertEquals(AiPipelineChoice.MLKIT_SUBJECT, AiPipelineChoice.fromId("ML_KIT"))
     }
 
     @Test
@@ -356,5 +359,95 @@ class CoreEnginesTest {
         assertEquals(2, fW2)
         assertEquals(2, fH2)
         assertEquals(0.4f, fused2[3], 0.001f)
+    }
+
+    @Test
+    fun testLinearThresholdRamp() {
+        val raw = floatArrayOf(0.1f, 0.3f, 0.5f, 0.75f, 1.0f)
+        val alpha = SegmentationEngine.applyLinearThresholdRamp(raw, 5, 1, threshold = 0.50f)
+
+        // <= 0.50 should be 0
+        assertEquals(0, alpha[0].toInt() and 0xFF)
+        assertEquals(0, alpha[1].toInt() and 0xFF)
+        assertEquals(0, alpha[2].toInt() and 0xFF)
+        // 0.75 is halfway between 0.50 and 1.0 -> ~127
+        val aMid = alpha[3].toInt() and 0xFF
+        assertTrue("Expected mid value around 127, was $aMid", aMid in 120..135)
+        // 1.0 is 255
+        assertEquals(255, alpha[4].toInt() and 0xFF)
+    }
+
+    @Test
+    fun testExpandMaskAlphaDilationAndErosion() {
+        val w = 5
+        val h = 5
+        val alpha = ByteArray(w * h)
+        // Single 255 pixel at center (2, 2)
+        alpha[2 * w + 2] = 255.toByte()
+
+        // Dilate by 1px
+        val dilated = SegmentationEngine.expandMaskAlpha(alpha, w, h, expansionPx = 1)
+        // Neighbor (2, 3) should now be 255
+        assertEquals(255, dilated[2 * w + 3].toInt() and 0xFF)
+        assertEquals(255, dilated[3 * w + 2].toInt() and 0xFF)
+
+        // Erode by 1px
+        val eroded = SegmentationEngine.expandMaskAlpha(dilated, w, h, expansionPx = -1)
+        // (0, 0) should remain 0
+        assertEquals(0, eroded[0].toInt() and 0xFF)
+    }
+
+    @Test
+    fun testBoxBlurAlphaSmoothsStep() {
+        val w = 6
+        val h = 1
+        val alpha = byteArrayOf(0, 0, 0, 255.toByte(), 255.toByte(), 255.toByte())
+        val blurred = SegmentationEngine.boxBlurAlpha(alpha, w, h, radius = 1)
+
+        val vBeforeStep = blurred[2].toInt() and 0xFF
+        val vAfterStep = blurred[3].toInt() and 0xFF
+        assertTrue("Blur should smooth step transition", vBeforeStep > 0 && vAfterStep < 255)
+    }
+
+    @Test
+    fun testColorDecontaminationCleansEdgeBleed() {
+        val w = 3
+        val h = 1
+        // Pixel 0: background (alpha 0, blue sky color 0x0000FF)
+        // Pixel 1: edge (alpha 120, contaminated blue sky color 0x0000FF)
+        // Pixel 2: core subject (alpha 255, red shirt color 0xFF0000)
+        val srcPixels = intArrayOf(
+            0xFF0000FF.toInt(), // Sky blue
+            0xFF0000FF.toInt(), // Contaminated edge
+            0xFFFF0000.toInt()  // Red shirt
+        )
+        val alpha = byteArrayOf(0, 120, 255.toByte())
+
+        val decontaminated = SegmentationEngine.decontaminateColors(srcPixels, alpha, w, h, radius = 2)
+
+        val edgeColor = decontaminated[1]
+        val edgeR = (edgeColor shr 16) and 0xFF
+        val edgeB = edgeColor and 0xFF
+
+        // The edge pixel should now have the red color of the core subject, NOT sky blue!
+        assertTrue("Decontaminated red component should be dominant, was $edgeR", edgeR > 200)
+        assertTrue("Decontaminated blue component should be suppressed, was $edgeB", edgeB == 0)
+    }
+
+    @Test
+    fun testResampleAlphaBilinearMagnification() {
+        val src = byteArrayOf(
+            0, 200.toByte(),
+            0, 200.toByte()
+        )
+        val dst = SegmentationEngine.resampleAlphaBilinear(src, 2, 2, 4, 4)
+        assertEquals(16, dst.size)
+        // Top-left should be 0
+        assertEquals(0, dst[0].toInt() and 0xFF)
+        // Top-right should be 200
+        assertEquals(200, dst[3].toInt() and 0xFF)
+        // Midpoint should be around 100
+        val mid = dst[1].toInt() and 0xFF
+        assertTrue("Bilinear interpolation at intermediate pixel should be around 66..133, was $mid", mid in 50..150)
     }
 }

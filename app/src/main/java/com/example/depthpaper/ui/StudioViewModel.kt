@@ -35,6 +35,7 @@ enum class PreviewSurface {
     HOME_SCREEN,
     AOD,
     DEPTH_MAP,
+    MLKIT_MASK,
     MEDIAPIPE_MASK,
     DEEPLAB_MASK,
     CUTOUT,
@@ -56,6 +57,7 @@ data class StudioUiState(
     val cutoutBitmap: Bitmap? = null,
     val backgroundBitmap: Bitmap? = null,
     val depthBitmap: Bitmap? = null,
+    val mlKitBitmap: Bitmap? = null,
     val mediaPipeBitmap: Bitmap? = null,
     val deepLabBitmap: Bitmap? = null,
     val isProcessing: Boolean = false,
@@ -164,9 +166,9 @@ class StudioViewModel(
             depthBitmap = depth
         )
 
-        // Automatically re-run inference if project was created with an earlier pipeline version (< 33)
-        if (project.pipelineVersion < 33 && src != null) {
-            AppLogger.i("StudioViewModel", "Project ${project.id} has pipelineVersion ${project.pipelineVersion} < 33, auto-upgrading cutout to v0.24.3")
+        // Automatically re-run inference if project was created with an earlier pipeline version (< 34)
+        if (project.pipelineVersion < 34 && src != null) {
+            AppLogger.i("StudioViewModel", "Project ${project.id} has pipelineVersion ${project.pipelineVersion} < 34, auto-upgrading cutout to v0.25.0")
             reprocessWithTuning()
         }
     }
@@ -195,7 +197,7 @@ class StudioViewModel(
                 selectedModel = AiModelChoice.DEPTH_ANYTHING_V2,
                 clockZDepth = 0.50f,
                 isActive = true,
-                pipelineVersion = 33
+                pipelineVersion = 34
             )
 
             val thumbScale = 480f / maxOf(safeWorkingBmp.width, safeWorkingBmp.height)
@@ -231,6 +233,7 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mlKitBitmap = result.mlKitMask,
                     mediaPipeBitmap = result.mediaPipeMask,
                     deepLabBitmap = result.deepLabMask,
                     isProcessing = false,
@@ -272,7 +275,7 @@ class StudioViewModel(
 
             val updated = cur.copy(
                 renderMode = RenderMode.LAYERED_2D,
-                pipelineVersion = 33
+                pipelineVersion = 34
             )
 
             val rawDepthBmp = if (result.normalizedDepth != null) {
@@ -301,6 +304,7 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mlKitBitmap = result.mlKitMask,
                     mediaPipeBitmap = result.mediaPipeMask,
                     deepLabBitmap = result.deepLabMask,
                     isProcessing = false,
@@ -494,7 +498,7 @@ class StudioViewModel(
             val initialCutout = result.foregroundCutout
 
             val saved = repository.saveProject(
-                project = updatedMeta.copy(pipelineVersion = 33),
+                project = updatedMeta.copy(pipelineVersion = 34),
                 cutoutBmp = initialCutout,
                 inpaintedBgBmp = result.inpaintedBackground,
                 depthBmp = result.depthMap,
@@ -507,6 +511,7 @@ class StudioViewModel(
                     cutoutBitmap = initialCutout,
                     backgroundBitmap = result.inpaintedBackground,
                     depthBitmap = result.depthMap,
+                    mlKitBitmap = result.mlKitMask,
                     mediaPipeBitmap = result.mediaPipeMask,
                     deepLabBitmap = result.deepLabMask,
                     isProcessing = false,

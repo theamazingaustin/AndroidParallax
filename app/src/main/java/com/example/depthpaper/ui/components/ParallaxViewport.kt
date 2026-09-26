@@ -54,6 +54,7 @@ fun ParallaxViewport(
     cutoutBmp: Bitmap?,
     backgroundBmp: Bitmap?,
     depthBmp: Bitmap?,
+    mlKitBmp: Bitmap? = null,
     mediaPipeBmp: Bitmap? = null,
     deepLabBmp: Bitmap? = null,
     simulatedTiltX: Float,
@@ -292,6 +293,7 @@ fun ParallaxViewport(
             // --- Diagnostic Map & Plate Inspection Modes ---
             val isInspectionMode = previewSurface in listOf(
                 PreviewSurface.DEPTH_MAP,
+                PreviewSurface.MLKIT_MASK,
                 PreviewSurface.MEDIAPIPE_MASK,
                 PreviewSurface.DEEPLAB_MASK,
                 PreviewSurface.CUTOUT,
@@ -320,6 +322,7 @@ fun ParallaxViewport(
 
                 val (targetBmp, labelText) = when (previewSurface) {
                     PreviewSurface.DEPTH_MAP -> (depthBmp ?: sourceBmp) to "3D DEPTH MAP (WARM = NEAR  COOL = FAR)"
+                    PreviewSurface.MLKIT_MASK -> (mlKitBmp ?: sourceBmp) to "GOOGLE ML KIT SUBJECT MASK"
                     PreviewSurface.MEDIAPIPE_MASK -> (mediaPipeBmp ?: sourceBmp) to "FACE & HAIR MASK (MEDIAPIPE MULTICLASS)"
                     PreviewSurface.DEEPLAB_MASK -> (deepLabBmp ?: sourceBmp) to "BODY & OBJECT MASK (DEEPLAB V3)"
                     PreviewSurface.CUTOUT -> (cutoutBmp ?: sourceBmp) to "FOREGROUND CUTOUT (ALPHA MATTE)"

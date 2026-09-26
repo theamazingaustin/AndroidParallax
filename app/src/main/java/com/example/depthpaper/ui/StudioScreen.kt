@@ -251,6 +251,7 @@ fun StudioScreen(
                 val mapOptions = listOf(
                     PreviewSurface.LOCK_SCREEN to "Live",
                     PreviewSurface.DEPTH_MAP to "Depth",
+                    PreviewSurface.MLKIT_MASK to "ML Kit",
                     PreviewSurface.MEDIAPIPE_MASK to "Face MP",
                     PreviewSurface.DEEPLAB_MASK to "Body DL",
                     PreviewSurface.CUTOUT to "Cutout",
@@ -307,6 +308,7 @@ fun StudioScreen(
                             cutoutBmp = state.cutoutBitmap,
                             backgroundBmp = state.backgroundBitmap,
                             depthBmp = state.depthBitmap,
+                            mlKitBmp = state.mlKitBitmap,
                             mediaPipeBmp = state.mediaPipeBitmap,
                             deepLabBmp = state.deepLabBitmap,
                             simulatedTiltX = state.simulatedTiltX,
@@ -355,6 +357,7 @@ fun StudioScreen(
                                 text = when (state.previewSurface) {
                                     PreviewSurface.LOCK_SCREEN -> "Touch & drag clock to reposition"
                                     PreviewSurface.DEPTH_MAP -> "3D Depth Map Active • Tilt to Inspect"
+                                    PreviewSurface.MLKIT_MASK -> "ML Kit Subject Mask • Google Foundation Model"
                                     PreviewSurface.MEDIAPIPE_MASK -> "Face MP Mask • Hair & Facial Contours"
                                     PreviewSurface.DEEPLAB_MASK -> "Body DL Mask • Limbs & Background People"
                                     PreviewSurface.CUTOUT -> "Cutout Active • Alpha Transparency"
@@ -694,6 +697,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     PreviewSurface.HOME_SCREEN -> "Simulating launcher with icons. Clock is auto-hidden to prevent clutter."
                     PreviewSurface.AOD -> "Power-saving pure black OLED display."
                     PreviewSurface.DEPTH_MAP -> "Visualizing AI continuous depth map (white = foreground, dark = background). Tilt phone to inspect depth planes."
+                    PreviewSurface.MLKIT_MASK -> "Visualizing Google Play Services ML Kit Subject Segmentation continuous confidence mask."
                     PreviewSurface.MEDIAPIPE_MASK -> "Visualizing MediaPipe Selfie Multiclass high-detail hair and facial contour mask."
                     PreviewSurface.DEEPLAB_MASK -> "Visualizing DeepLab v3 MobileNet body, limbs, pets, and object mask."
                     PreviewSurface.CUTOUT -> "Visualizing foreground alpha cutout on transparency grid."

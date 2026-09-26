@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.depthpaper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 33
-        versionName = "0.24.3"
+        versionCode = 34
+        versionName = "0.25.0"
     }
 
     signingConfigs {
@@ -90,6 +90,8 @@ dependencies {
   implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
   implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
   implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+  implementation("com.google.android.gms:play-services-base:18.5.0")
+  implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
   // Tooling
   debugImplementation(libs.androidx.compose.ui.tooling)
   // Instrumented tests
