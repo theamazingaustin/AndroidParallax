@@ -163,6 +163,12 @@ class StudioViewModel(
             backgroundBitmap = bg,
             depthBitmap = depth
         )
+
+        // Automatically re-run inference if project was created with an earlier pipeline version (< 33)
+        if (project.pipelineVersion < 33 && src != null) {
+            AppLogger.i("StudioViewModel", "Project ${project.id} has pipelineVersion ${project.pipelineVersion} < 33, auto-upgrading cutout to v0.24.3")
+            reprocessWithTuning()
+        }
     }
 
     fun importNewImage(bitmap: Bitmap, title: String = "My Wallpaper") {
@@ -188,7 +194,8 @@ class StudioViewModel(
                 selectedPipeline = AiPipelineChoice.UNIVERSAL_CASCADE,
                 selectedModel = AiModelChoice.DEPTH_ANYTHING_V2,
                 clockZDepth = 0.50f,
-                isActive = true
+                isActive = true,
+                pipelineVersion = 33
             )
 
             val thumbScale = 480f / maxOf(safeWorkingBmp.width, safeWorkingBmp.height)
@@ -264,7 +271,8 @@ class StudioViewModel(
             val thumbBmp = if (thumbScale < 1f) Bitmap.createScaledBitmap(bitmap, thumbW, thumbH, true) else bitmap
 
             val updated = cur.copy(
-                renderMode = RenderMode.LAYERED_2D
+                renderMode = RenderMode.LAYERED_2D,
+                pipelineVersion = 33
             )
 
             val rawDepthBmp = if (result.normalizedDepth != null) {
@@ -486,7 +494,7 @@ class StudioViewModel(
             val initialCutout = result.foregroundCutout
 
             val saved = repository.saveProject(
-                project = updatedMeta,
+                project = updatedMeta.copy(pipelineVersion = 33),
                 cutoutBmp = initialCutout,
                 inpaintedBgBmp = result.inpaintedBackground,
                 depthBmp = result.depthMap,

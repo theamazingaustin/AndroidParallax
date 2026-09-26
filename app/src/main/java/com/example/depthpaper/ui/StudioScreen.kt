@@ -195,6 +195,16 @@ fun StudioScreen(
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { viewModel.reprocessWithTuning() }
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Re-run AI Segmentation",
+                            tint = Color(0xFF00E5FF)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
                     Button(
                         onClick = { viewModel.setActiveWallpaper(state.currentProject.id, context) },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),

@@ -156,7 +156,8 @@ data class WallpaperProject(
     val motionConfig: MotionConfig = MotionConfig(),
     val lockScreenConfig: LockScreenConfig = LockScreenConfig(),
     val homeScreenConfig: HomeScreenConfig = HomeScreenConfig(),
-    val aodConfig: AodConfig = AodConfig()
+    val aodConfig: AodConfig = AodConfig(),
+    val pipelineVersion: Int = 0
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -191,6 +192,7 @@ data class WallpaperProject(
         put("lockScreenConfig", lockScreenConfig.toJson())
         put("homeScreenConfig", homeScreenConfig.toJson())
         put("aodConfig", aodConfig.toJson())
+        put("pipelineVersion", pipelineVersion)
     }
 
     companion object {
@@ -226,7 +228,8 @@ data class WallpaperProject(
             motionConfig = json.optJSONObject("motionConfig")?.let { MotionConfig.fromJson(it) } ?: MotionConfig(),
             lockScreenConfig = json.optJSONObject("lockScreenConfig")?.let { LockScreenConfig.fromJson(it) } ?: LockScreenConfig(),
             homeScreenConfig = json.optJSONObject("homeScreenConfig")?.let { HomeScreenConfig.fromJson(it) } ?: HomeScreenConfig(),
-            aodConfig = json.optJSONObject("aodConfig")?.let { AodConfig.fromJson(it) } ?: AodConfig()
+            aodConfig = json.optJSONObject("aodConfig")?.let { AodConfig.fromJson(it) } ?: AodConfig(),
+            pipelineVersion = json.optInt("pipelineVersion", 0)
         )
     }
 }

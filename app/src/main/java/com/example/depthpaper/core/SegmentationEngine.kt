@@ -489,7 +489,8 @@ class TfliteSegmenter(
         if (outputClasses == 1) {
             // selfie_segmenter.tflite: [1, 256, 256, 1] sigmoid probability
             for (i in 0 until totalPix) {
-                rawMask[i] = outputBuf.float.coerceIn(0f, 1f)
+                val p = outputBuf.float.coerceIn(0f, 1f)
+                rawMask[i] = if (p <= 0.12f) 0.0f else ((p - 0.12f) / (0.45f - 0.12f)).coerceIn(0f, 1f)
             }
         } else if (outputClasses == 6) {
             // selfie_multiclass.tflite: [1, 256, 256, 6] logits
@@ -506,7 +507,16 @@ class TfliteSegmenter(
                     sumExp += Math.exp((logits[c] - maxL).toDouble())
                 }
                 val bgProb = (Math.exp((logits[0] - maxL).toDouble()) / sumExp).toFloat()
-                rawMask[i] = (1.0f - bgProb).coerceIn(0f, 1f)
+                val personProb = (1.0f - bgProb).coerceIn(0f, 1f)
+                // MediaPipe Multiclass baseline noise floor on non-human background is ~0.08..0.12.
+                // Outstretched limbs, raised hands, and distant bodies produce ~0.20..0.45.
+                // Remap above noise floor so genuine human anatomy reaches solid confidence (> 0.50),
+                // while background remains strictly 0.00.
+                rawMask[i] = if (personProb <= 0.12f) {
+                    0.0f
+                } else {
+                    ((personProb - 0.12f) / (0.45f - 0.12f)).coerceIn(0f, 1f)
+                }
             }
         } else if (outputClasses == 21) {
             // deeplab_v3.tflite: [1, 257, 257, 21] logits
@@ -529,7 +539,12 @@ class TfliteSegmenter(
                 }
                 val salientProb = (salientExpSum / sumExp).toFloat()
                 val bgProb = (Math.exp((logits[0] - maxL).toDouble()) / sumExp).toFloat()
-                rawMask[i] = max(salientProb, (1.0f - bgProb) * 0.90f).coerceIn(0f, 1f)
+                val rawVal = max(salientProb, (1.0f - bgProb) * 0.90f).coerceIn(0f, 1f)
+                rawMask[i] = if (rawVal <= 0.12f) {
+                    0.0f
+                } else {
+                    ((rawVal - 0.12f) / (0.45f - 0.12f)).coerceIn(0f, 1f)
+                }
             }
         }
 
