@@ -1209,7 +1209,8 @@ class SegmentationEngine(private val context: Context) {
         fusionBalance: Float = 0.50f,
         enableHoleFilling: Boolean = true,
         holeFillingRadius: Int = 8,
-        depthLayerCount: Int = 8
+        depthLayerCount: Int = 8,
+        colorDecontamination: Int = 4
     ): SegmentationResult {
         // Downscale massive camera photos to max 1440px to prevent OOM
         val maxDim = 1440
@@ -1323,13 +1324,17 @@ class SegmentationEngine(private val context: Context) {
         // Stage 4: Color Decontamination:
         // For edge pixels (alpha in 1..200), replaces RGB with average of neighboring core pixels (alpha > 200)
         // to completely eliminate background halos (sky, sea, sand, cliff) bleeding into foreground edges.
-        val decontaminatedPixels = decontaminateColors(
-            srcPixels = sourcePixels,
-            alpha = fullAlpha,
-            width = w,
-            height = h,
-            radius = edgeFeathering.coerceIn(2, 8)
-        )
+        val decontaminatedPixels = if (colorDecontamination > 0) {
+            decontaminateColors(
+                srcPixels = sourcePixels,
+                alpha = fullAlpha,
+                width = w,
+                height = h,
+                radius = colorDecontamination.coerceIn(1, 12)
+            )
+        } else {
+            sourcePixels
+        }
 
         // Assemble final cutout bitmap with decontaminated RGB and refined alpha
         val totalPix = w * h

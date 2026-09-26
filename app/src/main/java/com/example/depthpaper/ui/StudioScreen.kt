@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToInt
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -247,47 +248,6 @@ fun StudioScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Intermediate Diagnostic Map Selector above preview (Pipeline order)
-                val mapOptions = listOf(
-                    PreviewSurface.LOCK_SCREEN to "Live",
-                    PreviewSurface.DEPTH_MAP to "Depth",
-                    PreviewSurface.MLKIT_MASK to "ML Kit",
-                    PreviewSurface.MEDIAPIPE_MASK to "Face MP",
-                    PreviewSurface.DEEPLAB_MASK to "Body DL",
-                    PreviewSurface.CUTOUT to "Cutout",
-                    PreviewSurface.INPAINTED_BG to "Infill"
-                )
-
-                Row(
-                    modifier = Modifier
-                        .padding(bottom = 6.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    mapOptions.forEach { (surface, label) ->
-                        val isSelected = state.previewSurface == surface
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E1E2E),
-                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF00E5FF) else Color(0xFF2E2E3E)),
-                            modifier = Modifier.clickable {
-                                viewModel.setPreviewSurface(
-                                    if (isSelected && surface != PreviewSurface.LOCK_SCREEN) PreviewSurface.LOCK_SCREEN else surface
-                                )
-                            }
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.Black else Color.White.copy(alpha = 0.85f),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
@@ -374,41 +334,42 @@ fun StudioScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Controls column beside preview: 3D toggle button directly above Z-slider
+                    // Controls beside preview: Depth view toggle
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxHeight(0.68f)
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color(0xFF00E5FF) else Color(0xFF1E1E2E),
                             border = BorderStroke(1.dp, if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color(0xFF00E5FF) else Color(0xFF3A3A4C)),
                             modifier = Modifier
-                                .size(36.dp)
                                 .clickable {
                                     viewModel.setPreviewSurface(
                                         if (state.previewSurface == PreviewSurface.DEPTH_MAP) PreviewSurface.LOCK_SCREEN else PreviewSurface.DEPTH_MAP
                                     )
                                 }
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ViewInAr,
+                                    contentDescription = "Depth",
+                                    tint = if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color.Black else Color(0xFF00E5FF),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "3D",
+                                    text = "Depth",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                     color = if (state.previewSurface == PreviewSurface.DEPTH_MAP) Color.Black else Color.White
                                 )
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        VerticalClockZSlider(
-                            clockZDepth = state.currentProject.clockZDepth,
-                            onZDepthChanged = { viewModel.onClockZDepthChanged(it) },
-                            modifier = Modifier.weight(1f)
-                        )
                     }
                 }
             }
@@ -652,6 +613,7 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
     var feathering by remember(project.id, project.edgeFeathering) { mutableIntStateOf(project.edgeFeathering) }
     var maskExpansion by remember(project.id, project.maskExpansion) { mutableIntStateOf(project.maskExpansion) }
     var inpaintRadius by remember(project.id, project.inpaintRadius) { mutableIntStateOf(project.inpaintRadius) }
+    var colorDecontamination by remember(project.id, project.colorDecontamination) { mutableIntStateOf(project.colorDecontamination) }
     var cutoutContrast by remember(project.id, project.cutoutContrast) { mutableFloatStateOf(project.cutoutContrast) }
     var depthPlaneOffset by remember(project.id, project.depthPlaneOffset) { mutableFloatStateOf(project.depthPlaneOffset) }
     var clockZDepth by remember(project.id, project.clockZDepth) { mutableFloatStateOf(project.clockZDepth) }
@@ -778,32 +740,99 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
             }
         }
 
-        // 4. Granular AI Tuning Controls with Dynamic Sliders
-
+        // 3. Mask & Edge Refinement (Advance Post-Processing Steps)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Depth & Parallax Controls", fontSize = 12.sp, color = Color.Gray)
+            Text("Mask & Edge Refinement", fontSize = 12.sp, color = Color.Gray)
 
-            // Clock Z-Position Slider with Full Z-Axis Freedom [0.0, 1.0] and 60 FPS live reactivity
-            val zDisplay = when {
-                clockZDepth <= 0.01f -> "0% (Fully Covered / Behind Scene)"
-                clockZDepth >= 0.99f -> "100% (Above Entire Scene)"
-                else -> "${(clockZDepth * 100).toInt()}%"
-            }
+            // 1. Threshold (tau) with smooth linear ramp [0.05..0.95]
             TuningSliderWithDefaultIndicator(
-                title = "Clock Z-Position",
-                value = clockZDepth,
+                title = "Threshold (τ)",
+                value = threshold,
                 onValueChange = {
-                    clockZDepth = it
-                    viewModel.onClockZDepthChanged(it)
+                    threshold = it
+                    viewModel.onTuningChanged(
+                        threshold = it,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        colorDecontamination = colorDecontamination
+                    )
                 },
-                valueRange = 0.0f..1.0f,
+                valueRange = 0.05f..0.95f,
                 recommendedValue = 0.50f,
-                displayValue = zDisplay,
-                description = "Continuous 3D depth positioning: adjust clock from fully covered behind the farthest depth (0%) to above the entire photo (100%). Drag to slide between subjects and background."
+                displayValue = "${(threshold * 100).toInt()}%",
+                description = "Smooth linear ramp around cutoff value. Lower keeps softer subject edges; higher makes mask boundary stricter."
             )
 
+            // 2. Expansion (Px) with separable 1D dilation/erosion [-20..+20 px]
+            val expansionDisplay = if (maskExpansion > 0) "+$maskExpansion px" else "$maskExpansion px"
+            TuningSliderWithDefaultIndicator(
+                title = "Expansion (Px)",
+                value = maskExpansion.toFloat(),
+                onValueChange = {
+                    val exp = it.roundToInt()
+                    maskExpansion = exp
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = exp,
+                        colorDecontamination = colorDecontamination
+                    )
+                },
+                valueRange = -20f..20f,
+                steps = 39,
+                recommendedValue = 0f,
+                displayValue = expansionDisplay,
+                description = "Separable morphological dilation (+) to expand boundary or erosion (-) to trim edge halos."
+            )
 
-            // 3D Parallax Intensity
+            // 3. Feather with 2-pass box blur [0..32 px]
+            TuningSliderWithDefaultIndicator(
+                title = "Feather",
+                value = feathering.toFloat(),
+                onValueChange = {
+                    val f = it.roundToInt()
+                    feathering = f
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = f,
+                        maskExpansion = maskExpansion,
+                        colorDecontamination = colorDecontamination
+                    )
+                },
+                valueRange = 0f..32f,
+                steps = 31,
+                recommendedValue = 6f,
+                displayValue = "${feathering} px",
+                description = "Fast 2-pass separable box blur on edge transitions for photorealistic organic blending."
+            )
+
+            // 4. Color Decontamination to kill background halo around hair and shoulders [0..10 px, 0 = OFF]
+            val decontamDisplay = if (colorDecontamination == 0) "OFF" else "${colorDecontamination} px"
+            TuningSliderWithDefaultIndicator(
+                title = "Color Decontamination",
+                value = colorDecontamination.toFloat(),
+                onValueChange = {
+                    val cd = it.roundToInt()
+                    colorDecontamination = cd
+                    viewModel.onTuningChanged(
+                        threshold = threshold,
+                        feathering = feathering,
+                        maskExpansion = maskExpansion,
+                        colorDecontamination = cd
+                    )
+                },
+                valueRange = 0f..10f,
+                steps = 9,
+                recommendedValue = 4f,
+                displayValue = decontamDisplay,
+                description = "Replaces halo edge RGB with subject core color to completely eliminate background halos (sky, sand, cliffs) around hair and shoulders."
+            )
+        }
+
+        // 4. Parallax & Motion Controls
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Parallax & Motion", fontSize = 12.sp, color = Color.Gray)
+
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("3D Parallax", fontSize = 12.sp, color = Color.White, modifier = Modifier.width(90.dp))
@@ -840,7 +869,8 @@ fun LayersAndMotionTab(viewModel: StudioViewModel, state: StudioUiState) {
                     fusionBalance = fusionBalance,
                     enableHoleFilling = enableHoleFilling,
                     holeFillingRadius = holeFillingRadius,
-                    depthLayerCount = depthLayers
+                    depthLayerCount = depthLayers,
+                    colorDecontamination = colorDecontamination
                 )
             },
             enabled = !state.isProcessing && state.sourceBitmap != null,
@@ -971,128 +1001,4 @@ private fun getFontFamilyAndWeight(style: ClockFontStyle): Pair<FontFamily, Font
     }
 }
 
-/**
- * Vertical Touch & Drag Clock Z-Depth Slider.
- * Rendered directly beside the phone preview frame so depth layering can be adjusted
- * live while viewing the full wallpaper preview.
- */
-@Composable
-fun VerticalClockZSlider(
-    clockZDepth: Float,
-    onZDepthChanged: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var trackHeightPx by remember { mutableFloatStateOf(1f) }
 
-    Column(
-        modifier = modifier
-            .width(44.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF141422).copy(alpha = 0.85f))
-            .border(1.dp, Color(0xFF28283E), RoundedCornerShape(16.dp))
-            .padding(vertical = 10.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        // Top: Near / Front
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Default.Layers,
-                contentDescription = null,
-                tint = Color(0xFF00E5FF),
-                modifier = Modifier.size(14.dp)
-            )
-            Text(
-                text = "FRONT",
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF00E5FF)
-            )
-        }
-
-        // Vertical Slider Track
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .width(28.dp)
-                .padding(vertical = 6.dp)
-                .onSizeChanged { size ->
-                    trackHeightPx = size.height.toFloat().coerceAtLeast(1f)
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        val fraction = (1f - (offset.y / trackHeightPx)).coerceIn(0f, 1f)
-                        onZDepthChanged(fraction)
-                    }
-                }
-                .pointerInput(Unit) {
-                    detectDragGestures { change, _ ->
-                        change.consume()
-                        val fraction = (1f - (change.position.y / trackHeightPx)).coerceIn(0f, 1f)
-                        onZDepthChanged(fraction)
-                    }
-                },
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            // Track background groove
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF1E1E2E))
-                    .border(1.dp, Color(0xFF2E2E44), RoundedCornerShape(4.dp))
-            )
-
-            // Active filled track (from bottom up to clockZDepth)
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight(clockZDepth.coerceIn(0.01f, 1f))
-                    .width(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF00E5FF), Color(0xFF7C4DFF))
-                        )
-                    )
-            )
-
-            // Draggable Thumb Handle with live percentage
-            val thumbOffsetY = ((1f - clockZDepth.coerceIn(0f, 1f)) * (trackHeightPx - 24f)).coerceAtLeast(0f)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .graphicsLayer {
-                        translationY = thumbOffsetY
-                    }
-                    .size(width = 28.dp, height = 24.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF00E5FF))
-                    .border(1.5.dp, Color.White, RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "${(clockZDepth * 100).toInt()}%",
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.Black
-                )
-            }
-        }
-
-        // Bottom: Far / Back
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "BACK",
-                fontSize = 8.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.LightGray
-            )
-            Text(
-                text = "Z-Axis",
-                fontSize = 7.sp,
-                color = Color.Gray
-            )
-        }
-    }
-}

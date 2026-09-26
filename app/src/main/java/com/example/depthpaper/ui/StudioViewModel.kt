@@ -183,6 +183,7 @@ class StudioViewModel(
                 edgeFeathering = 6,
                 maskExpansion = 0,
                 inpaintRadius = 0,
+                colorDecontamination = 4,
                 processingMode = ProcessingMode.PIPELINE,
                 pipelineChoice = AiPipelineChoice.UNIVERSAL_CASCADE,
                 modelChoice = AiModelChoice.DEPTH_ANYTHING_V2,
@@ -196,6 +197,7 @@ class StudioViewModel(
                 selectedPipeline = AiPipelineChoice.UNIVERSAL_CASCADE,
                 selectedModel = AiModelChoice.DEPTH_ANYTHING_V2,
                 clockZDepth = 0.50f,
+                colorDecontamination = 4,
                 isActive = true,
                 pipelineVersion = 34
             )
@@ -265,7 +267,8 @@ class StudioViewModel(
                 depthPlaneOffset = cur.depthPlaneOffset,
                 fusionBalance = cur.fusionBalance,
                 enableHoleFilling = cur.enableHoleFilling,
-                holeFillingRadius = cur.holeFillingRadius
+                holeFillingRadius = cur.holeFillingRadius,
+                colorDecontamination = cur.colorDecontamination
             )
 
             val thumbScale = 480f / maxOf(bitmap.width, bitmap.height)
@@ -428,6 +431,7 @@ class StudioViewModel(
         enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
         holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius,
         depthLayerCount: Int = _uiState.value.currentProject.depthLayerCount,
+        colorDecontamination: Int = _uiState.value.currentProject.colorDecontamination,
         debounceMs: Long = 250L
     ) {
         val src = _uiState.value.sourceBitmap ?: return
@@ -445,6 +449,7 @@ class StudioViewModel(
             fusionBalance = fusionBalance,
             enableHoleFilling = enableHoleFilling,
             holeFillingRadius = holeFillingRadius,
+            colorDecontamination = colorDecontamination,
             processingMode = processingMode,
             selectedModel = activeModel,
             selectedPipeline = pipelineChoice
@@ -485,7 +490,8 @@ class StudioViewModel(
                 fusionBalance = fusionBalance,
                 enableHoleFilling = enableHoleFilling,
                 holeFillingRadius = holeFillingRadius,
-                depthLayerCount = depthLayerCount
+                depthLayerCount = depthLayerCount,
+                colorDecontamination = colorDecontamination
             )
 
             val rawDepthBmp = if (result.normalizedDepth != null) {
@@ -535,7 +541,8 @@ class StudioViewModel(
         fusionBalance: Float = _uiState.value.currentProject.fusionBalance,
         enableHoleFilling: Boolean = _uiState.value.currentProject.enableHoleFilling,
         holeFillingRadius: Int = _uiState.value.currentProject.holeFillingRadius,
-        depthLayerCount: Int = _uiState.value.currentProject.depthLayerCount
+        depthLayerCount: Int = _uiState.value.currentProject.depthLayerCount,
+        colorDecontamination: Int = _uiState.value.currentProject.colorDecontamination
     ) {
         onTuningChanged(
             threshold = threshold,
@@ -552,6 +559,7 @@ class StudioViewModel(
             enableHoleFilling = enableHoleFilling,
             holeFillingRadius = holeFillingRadius,
             depthLayerCount = depthLayerCount,
+            colorDecontamination = colorDecontamination,
             debounceMs = 0L
         )
     }

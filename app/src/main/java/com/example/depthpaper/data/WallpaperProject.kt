@@ -140,6 +140,7 @@ data class WallpaperProject(
     val edgeFeathering: Int = 6,
     val maskExpansion: Int = 0,
     val inpaintRadius: Int = 8,
+    val colorDecontamination: Int = 4,
     val imageScale: Float = 1.0f,
     val imagePanX: Float = 0.0f,
     val imagePanY: Float = 0.0f,
@@ -175,6 +176,7 @@ data class WallpaperProject(
         put("edgeFeathering", edgeFeathering)
         put("maskExpansion", maskExpansion)
         put("inpaintRadius", inpaintRadius)
+        put("colorDecontamination", colorDecontamination)
         put("imageScale", imageScale.toDouble())
         put("imagePanX", imagePanX.toDouble())
         put("imagePanY", imagePanY.toDouble())
@@ -212,6 +214,7 @@ data class WallpaperProject(
             edgeFeathering = json.optInt("edgeFeathering", 6),
             maskExpansion = json.optInt("maskExpansion", 0),
             inpaintRadius = json.optInt("inpaintRadius", 8),
+            colorDecontamination = json.optInt("colorDecontamination", 4),
             imageScale = json.optDouble("imageScale", 1.0).toFloat(),
             imagePanX = json.optDouble("imagePanX", 0.0).toFloat(),
             imagePanY = json.optDouble("imagePanY", 0.0).toFloat(),
